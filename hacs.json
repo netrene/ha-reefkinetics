@@ -1,0 +1,7 @@
+{
+  "name": "Reef Kinetics ReefBot",
+  "render_readme": true,
+  "domains": ["reefbot"],
+  "homeassistant": "2025.1.0"
+}
+

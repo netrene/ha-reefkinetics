@@ -1,0 +1,64 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Reef Kinetics ReefBot",
+        "description": "Gib die Zugangsdaten aus einer authentifizierten Reef-Kinetics-Dashboard-Sitzung ein.",
+        "data": {
+          "token": "Token",
+          "user_id": "Benutzer-ID",
+          "device_token": "Device-Token"
+        }
+      },
+      "tank": {
+        "title": "Tank auswählen",
+        "data": {
+          "tank_id": "Tank"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Die Verbindung zum Reef-Kinetics-Gateway ist fehlgeschlagen.",
+      "invalid_auth": "Die Reef-Kinetics-Zugangsdaten wurden abgelehnt.",
+      "invalid_response": "Das Reef-Kinetics-Gateway hat eine unerwartete Antwort geliefert.",
+      "invalid_tank": "Der ausgewählte Tank ist nicht mehr verfügbar.",
+      "no_devices": "Für diesen Account wurden keine ReefBot-Geräte gefunden.",
+      "no_tanks": "Für diesen Account wurden keine Tanks gefunden.",
+      "unknown": "Unerwarteter Fehler."
+    },
+    "abort": {
+      "already_configured": "Dieser ReefBot-Tank ist bereits eingerichtet."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "online": {
+        "name": "Online"
+      }
+    },
+    "sensor": {
+      "firmware_version": {
+        "name": "Firmware-Version"
+      },
+      "last_successful_test": {
+        "name": "Letzter erfolgreicher Test"
+      },
+      "last_update": {
+        "name": "Letzte Aktualisierung"
+      },
+      "serial_number": {
+        "name": "Seriennummer"
+      },
+      "tank_name": {
+        "name": "Tankname"
+      },
+      "tank_volume": {
+        "name": "Tankvolumen"
+      },
+      "vials_number": {
+        "name": "Anzahl Vials"
+      }
+    }
+  }
+}
+

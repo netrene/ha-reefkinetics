@@ -1,0 +1,13 @@
+{
+  "domain": "reefbot",
+  "name": "Reef Kinetics ReefBot",
+  "codeowners": ["@netrene"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/netrene/ha-reefkinetics",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/netrene/ha-reefkinetics/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
