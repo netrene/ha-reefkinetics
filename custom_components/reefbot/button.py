@@ -59,7 +59,7 @@ class ReefBotStartTestButton(ReefBotEntity, ButtonEntity):
         super().__init__(coordinator, f"start_test_{operation_id}")
         self._operation_id = str(operation_id)
         display_name = _operation_display_name(operation) or self._operation_id
-        self._attr_name = f"Start test: {display_name}"
+        self._attr_name = str(display_name)
         self._attr_suggested_object_id = (
             f"reefbot_start_test_{slugify(str(display_name))}"
         )
