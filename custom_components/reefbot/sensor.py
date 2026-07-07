@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
@@ -298,7 +297,6 @@ class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
     """Configured chemical and fill level for one ReefBot tube."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = PERCENTAGE
     _attr_icon = "mdi:test-tube"
 
     def __init__(self, coordinator: ReefBotCoordinator, tube_number: int) -> None:
@@ -318,22 +316,21 @@ class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
         return f"Tube {self._tube_number}"
 
     @property
-    def native_value(self) -> int | None:
-        """Return tube fill level percentage."""
+    def native_value(self) -> float | str | None:
+        """Return current tube volume."""
         tube = self._tube()
         if not tube:
             return None
-        current = _coerce_number(_first_present(tube, ("CurrentValue", "currentValue")))
-        capacity = _coerce_number(
-            _first_present(
-                tube, ("SizeTypeValue", "sizeTypeValue", "CustomVolume", "customVolume")
-            )
-        )
-        if not isinstance(current, int | float) or not isinstance(capacity, int | float):
+        return _coerce_number(_first_present(tube, ("CurrentValue", "currentValue")))
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return the tube volume unit."""
+        tube = self._tube()
+        if not tube:
             return None
-        if capacity <= 0:
-            return None
-        return round(current / capacity * 100)
+        unit = _first_present(tube, ("Unit", "unit"))
+        return str(unit) if unit is not None else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -346,6 +343,7 @@ class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
         capacity = _first_present(
             tube, ("SizeTypeValue", "sizeTypeValue", "CustomVolume", "customVolume")
         )
+        fill_percentage = _fill_percentage(current, capacity)
         return {
             "tube_number": self._tube_number,
             "position_index": _first_present(tube, ("PositionIndex", "positionIndex")),
@@ -356,6 +354,7 @@ class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
             "chemical_name": _first_present(tube, ("ChemicalName", "chemicalName")),
             "current_volume": current,
             "capacity": capacity,
+            "fill_percentage": fill_percentage,
             "unit": _first_present(tube, ("Unit", "unit")),
             "size_type": _first_present(tube, ("SizeTypeName", "sizeTypeName")),
         }
@@ -744,6 +743,19 @@ def _coerce_number(value: Any) -> float | str | None:
         except ValueError:
             return value
     return str(value)
+
+
+def _fill_percentage(current: Any, capacity: Any) -> int | None:
+    """Return current volume as percentage of capacity."""
+    current_number = _coerce_number(current)
+    capacity_number = _coerce_number(capacity)
+    if not isinstance(current_number, int | float) or not isinstance(
+        capacity_number, int | float
+    ):
+        return None
+    if capacity_number <= 0:
+        return None
+    return round(current_number / capacity_number * 100)
 
 
 def _parse_datetime(value: Any) -> datetime | None:
