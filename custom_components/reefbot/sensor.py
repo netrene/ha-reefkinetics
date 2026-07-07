@@ -215,7 +215,17 @@ class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator, f"tube_{tube_number}")
         self._tube_number = tube_number
-        self._attr_name = f"Tube {tube_number}"
+
+    @property
+    def name(self) -> str:
+        """Return a tube name that includes the configured chemical."""
+        tube = self._tube()
+        chemical = _first_present(
+            tube, ("ChemicalDisplayName", "chemicalDisplayName")
+        )
+        if chemical:
+            return f"Tube {self._tube_number}: {chemical}"
+        return f"Tube {self._tube_number}"
 
     @property
     def native_value(self) -> int | None:
