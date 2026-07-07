@@ -21,6 +21,7 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Compact per-parameter result history exposed as sensor attributes.
 - Tube fill-level sensors named with their configured chemicals and volumes.
 - Configured tests sensor derived from installed chemicals and available operations.
+- Individual configured test sensors with tube and chemical mappings.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included

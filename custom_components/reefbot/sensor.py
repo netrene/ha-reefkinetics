@@ -31,6 +31,7 @@ async def async_setup_entry(
     """Set up ReefBot sensor entities."""
     coordinator: ReefBotCoordinator = hass.data[DOMAIN][entry.entry_id]
     known_parameters: set[str] = set()
+    known_configured_tests: set[str] = set()
 
     static_entities: list[SensorEntity] = [
         ReefBotDeviceSensor(
@@ -85,10 +86,34 @@ async def async_setup_entry(
             async_add_entities(entities)
 
     add_parameter_entities()
-    remove_listener: CALLBACK_TYPE = coordinator.async_add_listener(
+
+    @callback
+    def add_configured_test_entities() -> None:
+        entities: list[SensorEntity] = []
+        for operation in coordinator.data.configured_operations:
+            operation_id = _first_present(
+                operation, ("AvailableOperationId", "availableOperationId")
+            )
+            name = _first_present(operation, ("DisplayName", "displayName"))
+            if operation_id is None or not name:
+                continue
+            operation_key = str(operation_id)
+            if operation_key in known_configured_tests:
+                continue
+            known_configured_tests.add(operation_key)
+            entities.append(ReefBotConfiguredTestSensor(coordinator, operation))
+        if entities:
+            async_add_entities(entities)
+
+    add_configured_test_entities()
+    remove_parameter_listener: CALLBACK_TYPE = coordinator.async_add_listener(
         add_parameter_entities
     )
-    entry.async_on_unload(remove_listener)
+    remove_test_listener: CALLBACK_TYPE = coordinator.async_add_listener(
+        add_configured_test_entities
+    )
+    entry.async_on_unload(remove_parameter_listener)
+    entry.async_on_unload(remove_test_listener)
 
 
 class ReefBotDeviceSensor(ReefBotEntity, SensorEntity):
@@ -283,6 +308,72 @@ class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
         return None
 
 
+class ReefBotConfiguredTestSensor(ReefBotEntity, SensorEntity):
+    """A single configured ReefBot test based on installed chemicals."""
+
+    _attr_icon = "mdi:flask-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, coordinator: ReefBotCoordinator, operation: dict[str, Any]
+    ) -> None:
+        """Initialize the sensor."""
+        operation_id = _first_present(
+            operation, ("AvailableOperationId", "availableOperationId")
+        )
+        super().__init__(coordinator, f"configured_test_{operation_id}")
+        self._operation_id = str(operation_id)
+        display_name = _first_present(operation, ("DisplayName", "displayName"))
+        self._attr_suggested_object_id = (
+            f"reefbot_test_{slugify(str(display_name or operation_id))}"
+        )
+
+    @property
+    def name(self) -> str:
+        """Return the configured test display name."""
+        operation = self._operation()
+        return str(
+            _first_present(operation, ("DisplayName", "displayName"))
+            or f"Configured test {self._operation_id}"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the parameter measured by the configured test."""
+        operation = self._operation()
+        value = _first_present(
+            operation, ("OperationParameterName", "operationParameterName")
+        )
+        return str(value) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return configured test details."""
+        operation = self._operation()
+        if not operation:
+            return {"available_operation_id": self._operation_id}
+
+        tubes_by_chemical_id = _tubes_by_chemical_id(self.coordinator.data.tubes)
+        summary = _configured_operation_summary(operation, tubes_by_chemical_id)
+        latest = _latest_device_result_for_operation(
+            self.coordinator.data.device_results,
+            _first_present(operation, ("AvailableOperationName", "availableOperationName")),
+        )
+        if latest:
+            summary["latest_result"] = _device_result_summary(latest)
+        return summary
+
+    def _operation(self) -> dict[str, Any] | None:
+        """Return the current operation data for this test."""
+        for operation in self.coordinator.data.configured_operations:
+            operation_id = _first_present(
+                operation, ("AvailableOperationId", "availableOperationId")
+            )
+            if str(operation_id) == self._operation_id:
+                return operation
+        return None
+
+
 class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
     """Dynamic ReefBot test result sensor."""
 
@@ -446,6 +537,20 @@ def _device_result_summary(item: dict[str, Any]) -> dict[str, Any]:
         "unit": _first_present(item, ("ValueSuffixSymbol", "valueSuffixSymbol")),
         "date": _first_present(item, ("AddedDateString", "addedDateString")),
     }
+
+
+def _latest_device_result_for_operation(
+    results: list[dict[str, Any]], operation_name: Any
+) -> dict[str, Any] | None:
+    """Return the latest device result matching an operation name."""
+    if not operation_name:
+        return None
+    operation_text = str(operation_name).strip().lower()
+    for result in results:
+        result_name = _first_present(result, ("OperationName", "operationName"))
+        if result_name and str(result_name).strip().lower() == operation_text:
+            return result
+    return None
 
 
 def _tubes_by_chemical_id(tubes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
