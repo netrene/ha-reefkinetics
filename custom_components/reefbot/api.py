@@ -46,6 +46,7 @@ ENDPOINT_OPERATION_REQUEST_HISTORY = (
     "/api/APIService/GetOperationRequestsHistoryByTankId"
 )
 ENDPOINT_OPERATION_TYPES = "/api/APIService/GetOperationTypes"
+ENDPOINT_ONE_TIME_OPERATION_REQUEST = "/api/APIService/OneTimeOperationRequest"
 
 
 class ReefBotApiError(Exception):
@@ -207,6 +208,22 @@ class ReefBotApiClient:
         """Return ReefBot operation request type labels."""
         payload = await self._post(ENDPOINT_OPERATION_TYPES)
         return self._extract_list(payload, ("Types", "types"))
+
+    async def request_one_time_operation(
+        self,
+        device_id: int | str,
+        tank_id: int | str,
+        available_operation_id: int | str,
+    ) -> None:
+        """Request a one-time ReefBot operation."""
+        await self._post(
+            ENDPOINT_ONE_TIME_OPERATION_REQUEST,
+            {
+                "DeviceIdArray": [device_id],
+                "AvailableOperationId": available_operation_id,
+                "TankId": tank_id,
+            },
+        )
 
     async def _post(
         self,

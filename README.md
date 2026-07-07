@@ -23,11 +23,14 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Configured tests sensor derived from installed chemicals and available operations.
 - Individual configured test sensors with tube and chemical mappings.
 - Current operation and pending operation sensors for manually started or queued tests.
+- Start-test button entities for configured tests.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included
 
-This integration does not start tests, abort tests, calibrate the device, configure reagents, or perform any write operation.
+This integration can start configured one-time tests through Home Assistant button entities. Those buttons call the Reef Kinetics cloud API and can consume reagents.
+
+This integration does not abort tests, calibrate the device, configure reagents, or perform maintenance write operations.
 
 Maintenance functions are intentionally out of scope for the first version.
 
@@ -62,6 +65,7 @@ The default polling interval is 5 minutes. ReefBot tests are usually much less f
 - `POST /api/APIService/GetOperationResultsByTankIdWithColorsV2`
 - `POST /api/APIService/GetPendingOperationRequestsByTank`
 - `POST /api/APIService/GetOperationRequestsHistoryByTankId`
+- `POST /api/APIService/OneTimeOperationRequest`
 
 ## Roadmap
 
