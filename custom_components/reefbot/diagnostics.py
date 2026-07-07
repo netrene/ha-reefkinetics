@@ -44,6 +44,29 @@ async def async_get_config_entry_diagnostics(
             }
             for parameter in (data.parameters if data else [])
         ],
+        "tubes": [
+            {
+                "tube_number": _tube_number(tube),
+                "chemical_display_name": tube.get("ChemicalDisplayName"),
+                "current_value": tube.get("CurrentValue"),
+                "capacity": tube.get("SizeTypeValue") or tube.get("CustomVolume"),
+                "unit": tube.get("Unit"),
+            }
+            for tube in (data.tubes if data else [])
+        ],
+        "configured_tests": [
+            {
+                "display_name": operation.get("DisplayName"),
+                "operation_parameter_name": operation.get("OperationParameterName"),
+                "related_chemicals_count": len(
+                    operation.get("RelatedChemicals") or []
+                ),
+            }
+            for operation in (data.configured_operations if data else [])
+        ],
+        "available_operations_count": (
+            len(data.available_operations) if data else 0
+        ),
         "last_update_success": coordinator.last_update_success if coordinator else None,
         "last_update_success_time": (
             coordinator.last_successful_refresh.isoformat()
@@ -63,3 +86,11 @@ def _redact(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact(item) for item in value]
     return value
+
+
+def _tube_number(tube: dict[str, Any]) -> int | None:
+    """Return the one-based tube number from a chemical setting."""
+    try:
+        return int(tube.get("PositionIndex")) + 1
+    except (TypeError, ValueError):
+        return None

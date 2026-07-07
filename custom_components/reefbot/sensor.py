@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.const import PERCENTAGE
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
@@ -59,8 +60,10 @@ async def async_setup_entry(
             "tank_volume",
             _tank_value("Volume", "volume"),
         ),
+        ReefBotConfiguredTestsSensor(coordinator),
         ReefBotLastUpdateSensor(coordinator),
         ReefBotLastSuccessfulTestSensor(coordinator),
+        *[ReefBotTubeSensor(coordinator, tube_number) for tube_number in range(1, 9)],
     ]
     async_add_entities(static_entities)
 
@@ -165,6 +168,111 @@ class ReefBotLastSuccessfulTestSensor(ReefBotEntity, SensorEntity):
         return max(dates) if dates else None
 
 
+class ReefBotConfiguredTestsSensor(ReefBotEntity, SensorEntity):
+    """Number of currently configured tests based on installed chemicals."""
+
+    _attr_translation_key = "configured_tests"
+    _attr_icon = "mdi:test-tube"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "configured_tests")
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of configured operations."""
+        return len(self.coordinator.data.configured_operations)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return configured operation details."""
+        tubes_by_chemical_id = _tubes_by_chemical_id(self.coordinator.data.tubes)
+        return {
+            "tests": [
+                _configured_operation_summary(operation, tubes_by_chemical_id)
+                for operation in self.coordinator.data.configured_operations
+            ],
+            "available_operations_count": len(
+                self.coordinator.data.available_operations
+            ),
+            "latest_results": [
+                _device_result_summary(result)
+                for result in self.coordinator.data.device_results[:5]
+                if isinstance(result, dict)
+            ],
+        }
+
+
+class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
+    """Configured chemical and fill level for one ReefBot tube."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:test-tube"
+
+    def __init__(self, coordinator: ReefBotCoordinator, tube_number: int) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, f"tube_{tube_number}")
+        self._tube_number = tube_number
+        self._attr_name = f"Tube {tube_number}"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return tube fill level percentage."""
+        tube = self._tube()
+        if not tube:
+            return None
+        current = _coerce_number(_first_present(tube, ("CurrentValue", "currentValue")))
+        capacity = _coerce_number(
+            _first_present(
+                tube, ("SizeTypeValue", "sizeTypeValue", "CustomVolume", "customVolume")
+            )
+        )
+        if not isinstance(current, int | float) or not isinstance(capacity, int | float):
+            return None
+        if capacity <= 0:
+            return None
+        return round(current / capacity * 100)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return tube chemical metadata."""
+        tube = self._tube()
+        if not tube:
+            return {"tube_number": self._tube_number}
+
+        current = _first_present(tube, ("CurrentValue", "currentValue"))
+        capacity = _first_present(
+            tube, ("SizeTypeValue", "sizeTypeValue", "CustomVolume", "customVolume")
+        )
+        return {
+            "tube_number": self._tube_number,
+            "position_index": _first_present(tube, ("PositionIndex", "positionIndex")),
+            "chemical_id": _first_present(tube, ("ChemicalId", "chemicalId")),
+            "chemical_display_name": _first_present(
+                tube, ("ChemicalDisplayName", "chemicalDisplayName")
+            ),
+            "chemical_name": _first_present(tube, ("ChemicalName", "chemicalName")),
+            "current_volume": current,
+            "capacity": capacity,
+            "unit": _first_present(tube, ("Unit", "unit")),
+            "size_type": _first_present(tube, ("SizeTypeName", "sizeTypeName")),
+        }
+
+    def _tube(self) -> dict[str, Any] | None:
+        """Return the chemical setting for this tube."""
+        expected_position = self._tube_number - 1
+        for tube in self.coordinator.data.tubes:
+            position = _first_present(tube, ("PositionIndex", "positionIndex"))
+            try:
+                if int(position) == expected_position:
+                    return tube
+            except (TypeError, ValueError):
+                continue
+        return None
+
+
 class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
     """Dynamic ReefBot test result sensor."""
 
@@ -178,6 +286,7 @@ class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
         self._parameter_name = parameter_name
         self._parameter_key = parameter_key
         self._attr_name = parameter_name
+        self._attr_suggested_object_id = f"reefbot_{parameter_key}"
         self._attr_native_unit_of_measurement = self._unit()
 
     @property
@@ -316,6 +425,88 @@ def _history_summary(item: dict[str, Any]) -> dict[str, Any]:
         ),
         "operation": _first_present(item, ("OperationName", "operationName")),
         "device": _first_present(item, ("DeviceName", "deviceName")),
+    }
+
+
+def _device_result_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact latest device result summary."""
+    return {
+        "operation": _first_present(item, ("OperationName", "operationName")),
+        "value": _first_present(item, ("Value", "value")),
+        "unit": _first_present(item, ("ValueSuffixSymbol", "valueSuffixSymbol")),
+        "date": _first_present(item, ("AddedDateString", "addedDateString")),
+    }
+
+
+def _tubes_by_chemical_id(tubes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Return installed tubes keyed by chemical ID."""
+    result: dict[str, dict[str, Any]] = {}
+    for tube in tubes:
+        chemical_id = _first_present(tube, ("ChemicalId", "chemicalId"))
+        if chemical_id is not None:
+            result[str(chemical_id)] = tube
+    return result
+
+
+def _configured_operation_summary(
+    operation: dict[str, Any], tubes_by_chemical_id: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Return a compact configured operation summary."""
+    related = _first_present(operation, ("RelatedChemicals", "relatedChemicals"))
+    chemicals = [
+        _related_chemical_summary(chemical, tubes_by_chemical_id)
+        for chemical in related
+        if isinstance(chemical, dict)
+    ] if isinstance(related, list) else []
+    return {
+        "available_operation_id": _first_present(
+            operation, ("AvailableOperationId", "availableOperationId")
+        ),
+        "display_name": _first_present(operation, ("DisplayName", "displayName")),
+        "operation_name": _first_present(
+            operation, ("AvailableOperationName", "availableOperationName")
+        ),
+        "method": _first_present(operation, ("OperationMethodName", "operationMethodName")),
+        "parameter": _first_present(
+            operation, ("OperationParameterName", "operationParameterName")
+        ),
+        "parameter_id": _first_present(
+            operation, ("OperationParameterId", "operationParameterId")
+        ),
+        "chemicals": chemicals,
+    }
+
+
+def _related_chemical_summary(
+    chemical: dict[str, Any], tubes_by_chemical_id: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Return a compact related chemical summary with tube mapping."""
+    chemical_id = _first_present(
+        chemical, ("AvailableChemicalId", "availableChemicalId", "ChemicalId", "chemicalId")
+    )
+    tube = tubes_by_chemical_id.get(str(chemical_id)) if chemical_id is not None else None
+    position = _first_present(tube, ("PositionIndex", "positionIndex")) if tube else None
+    tube_number: int | None = None
+    try:
+        tube_number = int(position) + 1 if position is not None else None
+    except (TypeError, ValueError):
+        tube_number = None
+
+    return {
+        "chemical_id": chemical_id,
+        "display_name": _first_present(chemical, ("DisplayName", "displayName")),
+        "name": _first_present(chemical, ("Name", "name")),
+        "tube": tube_number,
+        "current_volume": _first_present(tube, ("CurrentValue", "currentValue"))
+        if tube
+        else None,
+        "capacity": _first_present(tube, ("SizeTypeValue", "sizeTypeValue"))
+        if tube
+        else None,
+        "unit": _first_present(tube, ("Unit", "unit")) if tube else None,
+        "stop_at_percentage": _first_present(
+            chemical, ("StopAtPercentage", "stopAtPercentage")
+        ),
     }
 
 

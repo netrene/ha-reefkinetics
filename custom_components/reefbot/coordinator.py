@@ -34,6 +34,10 @@ class ReefBotData:
     tanks: list[dict[str, Any]]
     results: dict[str, Any]
     parameter_results: dict[str, list[dict[str, Any]]]
+    chemicals: list[dict[str, Any]]
+    available_operations: list[dict[str, Any]]
+    source_settings: list[dict[str, Any]]
+    device_results: list[dict[str, Any]]
 
     @property
     def device(self) -> dict[str, Any] | None:
@@ -72,6 +76,60 @@ class ReefBotData:
         if isinstance(history, list):
             return [item for item in history if isinstance(item, dict)]
         return []
+
+    @property
+    def tubes(self) -> list[dict[str, Any]]:
+        """Return chemical settings ordered by tube position."""
+        return sorted(
+            self.chemicals,
+            key=lambda item: int(
+                _first_present(item, ("PositionIndex", "positionIndex")) or 0
+            ),
+        )
+
+    @property
+    def configured_operations(self) -> list[dict[str, Any]]:
+        """Return available operations whose required chemicals are installed."""
+        chemical_ids = {
+            str(chemical_id)
+            for chemical in self.chemicals
+            if (
+                chemical_id := _first_present(
+                    chemical, ("ChemicalId", "chemicalId", "AvailableChemicalId")
+                )
+            )
+            is not None
+        }
+        if not chemical_ids:
+            return []
+
+        configured: list[dict[str, Any]] = []
+        for operation in self.available_operations:
+            related = _first_present(
+                operation, ("RelatedChemicals", "relatedChemicals")
+            )
+            if not isinstance(related, list) or not related:
+                continue
+            related_ids = {
+                str(chemical_id)
+                for chemical in related
+                if isinstance(chemical, dict)
+                and (
+                    chemical_id := _first_present(
+                        chemical,
+                        (
+                            "AvailableChemicalId",
+                            "availableChemicalId",
+                            "ChemicalId",
+                            "chemicalId",
+                        ),
+                    )
+                )
+                is not None
+            }
+            if related_ids and related_ids <= chemical_ids:
+                configured.append(operation)
+        return configured
 
 
 class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
@@ -118,6 +176,35 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
                 if tank_id
                 else {}
             )
+            device_id = self.entry.data.get(CONF_DEVICE_ID)
+            if device_id is None and devices:
+                device_id = devices[0].get("DeviceId", devices[0].get("deviceId"))
+            chemicals = (
+                await self._async_optional_list(
+                    self.client.get_device_chemical_settings, device_id
+                )
+                if device_id
+                else []
+            )
+            available_operations = (
+                await self._async_optional_list(
+                    self.client.get_available_operations, device_id
+                )
+                if device_id
+                else []
+            )
+            source_settings = (
+                await self._async_optional_list(
+                    self.client.get_device_source_settings, device_id
+                )
+                if device_id
+                else []
+            )
+            device_results = (
+                await self._async_optional_list(self.client.get_device_results, device_id)
+                if device_id
+                else []
+            )
         except ReefBotAuthError as err:
             raise ConfigEntryAuthFailed("ReefBot authentication failed") from err
         except ReefBotApiError as err:
@@ -129,7 +216,19 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
             tanks=tanks,
             results=results,
             parameter_results=parameter_results,
+            chemicals=chemicals,
+            available_operations=available_operations,
+            source_settings=source_settings,
+            device_results=device_results,
         )
+
+    async def _async_optional_list(self, method: Any, *args: Any) -> list[dict[str, Any]]:
+        """Fetch optional list data without failing the whole coordinator."""
+        try:
+            return await method(*args)
+        except ReefBotApiError:
+            _LOGGER.debug("Unable to fetch optional ReefBot data", exc_info=True)
+            return []
 
     async def _async_fetch_parameter_results(
         self, results: dict[str, Any], tank_id: int | str

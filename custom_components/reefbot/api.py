@@ -35,6 +35,10 @@ ENDPOINT_RESULTS = "/api/APIService/GetOperationResultsByTankIdWithColorsV2"
 ENDPOINT_PARAMETER_RESULTS = (
     "/api/APIService/GetOperationResultsByTankIdOperationParameterIdWithColors"
 )
+ENDPOINT_CHEMICAL_SETTINGS = "/api/APIService/GetDeviceChemicalSettings"
+ENDPOINT_AVAILABLE_OPERATIONS = "/api/APIService/GetAvailableOperations"
+ENDPOINT_SOURCE_SETTINGS = "/api/APIService/GetDeviceSourceSettings"
+ENDPOINT_DEVICE_RESULTS = "/api/APIService/GetOperationResultsByDeviceIdV2"
 
 
 class ReefBotApiError(Exception):
@@ -144,6 +148,32 @@ class ReefBotApiClient:
                 "OperationParameterId": operation_parameter_id,
             },
         )
+        return self._extract_list(payload, ("Results", "results"))
+
+    async def get_device_chemical_settings(
+        self, device_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return configured ReefBot vial chemical settings."""
+        payload = await self._post(ENDPOINT_CHEMICAL_SETTINGS, {"DeviceId": device_id})
+        return self._extract_list(payload, ("Chemicals", "chemicals"))
+
+    async def get_available_operations(
+        self, device_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return all operations available for a ReefBot device."""
+        payload = await self._post(ENDPOINT_AVAILABLE_OPERATIONS, {"DeviceId": device_id})
+        return self._extract_list(payload, ("Operations", "operations"))
+
+    async def get_device_source_settings(
+        self, device_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return configured ReefBot source settings."""
+        payload = await self._post(ENDPOINT_SOURCE_SETTINGS, {"DeviceId": device_id})
+        return self._extract_list(payload, ("Sources", "sources"))
+
+    async def get_device_results(self, device_id: int | str) -> list[dict[str, Any]]:
+        """Return latest operation results for a ReefBot device."""
+        payload = await self._post(ENDPOINT_DEVICE_RESULTS, {"DeviceId": device_id})
         return self._extract_list(payload, ("Results", "results"))
 
     async def _post(

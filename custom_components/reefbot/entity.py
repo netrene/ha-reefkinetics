@@ -20,6 +20,7 @@ class ReefBotEntity(CoordinatorEntity[ReefBotCoordinator]):
         """Initialize the entity."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{suffix}"
+        self._attr_suggested_object_id = f"reefbot_{suffix}"
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -54,4 +55,3 @@ def _first_present(data: dict[str, Any] | None, keys: tuple[str, ...]) -> Any:
         if value not in (None, ""):
             return value
     return None
-

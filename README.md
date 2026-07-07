@@ -19,6 +19,8 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Firmware, serial number, vial count, tank name, and tank volume sensors.
 - Dynamic sensors for all parameters returned by the ReefBot API.
 - Compact per-parameter result history exposed as sensor attributes.
+- Tube fill-level sensors with configured chemicals and volumes.
+- Configured tests sensor derived from installed chemicals and available operations.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included

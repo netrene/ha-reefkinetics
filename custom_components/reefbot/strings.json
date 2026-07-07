@@ -46,6 +46,9 @@
       }
     },
     "sensor": {
+      "configured_tests": {
+        "name": "Configured tests"
+      },
       "firmware_version": {
         "name": "Firmware version"
       },
