@@ -24,15 +24,17 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Individual configured test sensors with tube and chemical mappings.
 - Current operation and pending operation sensors for manually started or queued tests.
 - Start-test button entities for configured tests.
+- Read-only maintenance sensors for syringe, waste, and RODI levels.
+- Read-only sensors for notifications, configured safe margins, alarm logs, and pending calibrations.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included
 
 This integration can start configured one-time tests through Home Assistant button entities. Those buttons call the Reef Kinetics cloud API and can consume reagents.
 
-This integration does not abort tests, calibrate the device, configure reagents, or perform maintenance write operations.
+This integration does not abort tests, calibrate the device, configure reagents, refill chemicals, empty waste, refill RODI, or perform maintenance write operations.
 
-Maintenance functions are intentionally out of scope for the first version.
+Maintenance writes are intentionally out of scope until the matching dashboard behavior has been reviewed carefully.
 
 ## Installation With HACS
 
@@ -66,10 +68,18 @@ The default polling interval is 5 minutes. ReefBot tests are usually much less f
 - `POST /api/APIService/GetPendingOperationRequestsByTank`
 - `POST /api/APIService/GetOperationRequestsHistoryByTankId`
 - `POST /api/APIService/OneTimeOperationRequest`
+- `POST /api/APIService/GetDeviceComponentSettings`
+- `POST /api/APIService/CheckPendingCalibrationRequestsV2`
+- `POST /api/APIService/GetSizeTypes`
+- `POST /api/APIService/GetComponents`
+- `POST /api/APIService/GetTankAlarmsByTankId`
+- `POST /api/APIService/GetAlarmLogsByTankId`
+- `POST /api/Notifications/GetUserNotifications`
+- `POST /api/APIService/GetNotReadUserNotificationsCount`
 
 ## Roadmap
 
-- Read-only maintenance sensors for reagents, components, and calibration status.
+- Maintenance actions for carefully reviewed refill/reset/calibration workflows.
 - Options flow for polling interval.
 - Better parameter metadata once more API samples are available.
 - Optional support for multiple tanks per account.

@@ -49,6 +49,18 @@
       "configured_tests": {
         "name": "Configured tests"
       },
+      "alarm_logs": {
+        "name": "Alarm logs"
+      },
+      "notifications": {
+        "name": "Notifications"
+      },
+      "pending_calibrations": {
+        "name": "Pending calibrations"
+      },
+      "safe_margins": {
+        "name": "Safe margins"
+      },
       "current_operation": {
         "name": "Current operation"
       },

@@ -47,6 +47,18 @@ ENDPOINT_OPERATION_REQUEST_HISTORY = (
 )
 ENDPOINT_OPERATION_TYPES = "/api/APIService/GetOperationTypes"
 ENDPOINT_ONE_TIME_OPERATION_REQUEST = "/api/APIService/OneTimeOperationRequest"
+ENDPOINT_COMPONENT_SETTINGS = "/api/APIService/GetDeviceComponentSettings"
+ENDPOINT_PENDING_CALIBRATION_REQUESTS = (
+    "/api/APIService/CheckPendingCalibrationRequestsV2"
+)
+ENDPOINT_SIZE_TYPES = "/api/APIService/GetSizeTypes"
+ENDPOINT_COMPONENTS = "/api/APIService/GetComponents"
+ENDPOINT_TANK_ALARMS = "/api/APIService/GetTankAlarmsByTankId"
+ENDPOINT_ALARM_LOGS = "/api/APIService/GetAlarmLogsByTankId"
+ENDPOINT_NOTIFICATIONS = "/api/Notifications/GetUserNotifications"
+ENDPOINT_NOT_READ_NOTIFICATIONS_COUNT = (
+    "/api/APIService/GetNotReadUserNotificationsCount"
+)
 
 
 class ReefBotApiError(Exception):
@@ -224,6 +236,81 @@ class ReefBotApiClient:
                 "TankId": tank_id,
             },
         )
+
+    async def get_device_component_settings(
+        self, device_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return configured ReefBot component maintenance settings."""
+        payload = await self._post(ENDPOINT_COMPONENT_SETTINGS, {"DeviceId": device_id})
+        return self._extract_list(payload, ("Components", "components", "Settings"))
+
+    async def get_pending_calibration_requests(
+        self, device_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return pending calibration requests for a ReefBot device."""
+        payload = await self._post(
+            ENDPOINT_PENDING_CALIBRATION_REQUESTS, {"DeviceIdArray": [device_id]}
+        )
+        return self._extract_list(payload, ("Requests", "requests", "Calibrations"))
+
+    async def get_size_types(self) -> list[dict[str, Any]]:
+        """Return configured size type definitions."""
+        payload = await self._post(ENDPOINT_SIZE_TYPES)
+        return self._extract_list(payload, ("SizeTypes", "sizeTypes"))
+
+    async def get_components(self) -> list[dict[str, Any]]:
+        """Return component definitions."""
+        payload = await self._post(ENDPOINT_COMPONENTS)
+        return self._extract_list(payload, ("Components", "components"))
+
+    async def get_tank_alarms(self, tank_id: int | str) -> list[dict[str, Any]]:
+        """Return safe-margin alarms for a tank."""
+        payload = await self._post(ENDPOINT_TANK_ALARMS, {"tankId": tank_id})
+        return self._extract_list(payload, ("Alarms", "alarms"))
+
+    async def get_alarm_logs(self, tank_id: int | str) -> list[dict[str, Any]]:
+        """Return alarm log entries for a tank."""
+        payload = await self._post(ENDPOINT_ALARM_LOGS, {"tankId": tank_id})
+        return self._extract_list(payload, ("Logs", "logs", "Alarms", "alarms"))
+
+    async def get_user_notifications(
+        self, page_index: int = 0, page_size: int = 6
+    ) -> list[dict[str, Any]]:
+        """Return user notifications."""
+        payload = await self._post(
+            ENDPOINT_NOTIFICATIONS,
+            {"pageIndex": page_index, "pageSize": page_size},
+        )
+        return self._extract_list(payload, ("Notifications", "notifications", "Items"))
+
+    async def get_unread_notifications_count(self) -> int | None:
+        """Return unread notification count."""
+        payload = await self._post(ENDPOINT_NOT_READ_NOTIFICATIONS_COUNT)
+        data = payload.get("Data", payload.get("data", payload))
+        if isinstance(data, int):
+            return data
+        if isinstance(data, str):
+            try:
+                return int(data)
+            except ValueError:
+                return None
+        if isinstance(data, dict):
+            for key in (
+                "Count",
+                "count",
+                "NotReadCount",
+                "notReadCount",
+                "UnreadCount",
+                "unreadCount",
+            ):
+                value = data.get(key)
+                if value is None:
+                    continue
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
 
     async def _post(
         self,

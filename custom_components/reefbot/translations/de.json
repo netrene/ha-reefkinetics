@@ -49,6 +49,18 @@
       "configured_tests": {
         "name": "Konfigurierte Tests"
       },
+      "alarm_logs": {
+        "name": "Alarmhistorie"
+      },
+      "notifications": {
+        "name": "Benachrichtigungen"
+      },
+      "pending_calibrations": {
+        "name": "Ausstehende Kalibrierungen"
+      },
+      "safe_margins": {
+        "name": "Sicherheitsbereiche"
+      },
       "current_operation": {
         "name": "Aktueller Vorgang"
       },

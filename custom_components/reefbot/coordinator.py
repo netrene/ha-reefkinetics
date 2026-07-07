@@ -41,6 +41,14 @@ class ReefBotData:
     pending_operation_requests: list[dict[str, Any]]
     operation_request_history: list[dict[str, Any]]
     operation_types: list[dict[str, Any]]
+    component_settings: list[dict[str, Any]]
+    pending_calibration_requests: list[dict[str, Any]]
+    size_types: list[dict[str, Any]]
+    components: list[dict[str, Any]]
+    tank_alarms: list[dict[str, Any]]
+    alarm_logs: list[dict[str, Any]]
+    notifications: list[dict[str, Any]]
+    unread_notifications_count: int | None
 
     @property
     def device(self) -> dict[str, Any] | None:
@@ -248,6 +256,38 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
             operation_types = await self._async_optional_list(
                 self.client.get_operation_types
             )
+            component_settings = (
+                await self._async_optional_list(
+                    self.client.get_device_component_settings, device_id
+                )
+                if device_id
+                else []
+            )
+            pending_calibration_requests = (
+                await self._async_optional_list(
+                    self.client.get_pending_calibration_requests, device_id
+                )
+                if device_id
+                else []
+            )
+            size_types = await self._async_optional_list(self.client.get_size_types)
+            components = await self._async_optional_list(self.client.get_components)
+            tank_alarms = (
+                await self._async_optional_list(self.client.get_tank_alarms, tank_id)
+                if tank_id
+                else []
+            )
+            alarm_logs = (
+                await self._async_optional_list(self.client.get_alarm_logs, tank_id)
+                if tank_id
+                else []
+            )
+            notifications = await self._async_optional_list(
+                self.client.get_user_notifications
+            )
+            unread_notifications_count = await self._async_optional_value(
+                self.client.get_unread_notifications_count
+            )
         except ReefBotAuthError as err:
             raise ConfigEntryAuthFailed("ReefBot authentication failed") from err
         except ReefBotApiError as err:
@@ -266,6 +306,14 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
             pending_operation_requests=pending_operation_requests,
             operation_request_history=operation_request_history,
             operation_types=operation_types,
+            component_settings=component_settings,
+            pending_calibration_requests=pending_calibration_requests,
+            size_types=size_types,
+            components=components,
+            tank_alarms=tank_alarms,
+            alarm_logs=alarm_logs,
+            notifications=notifications,
+            unread_notifications_count=unread_notifications_count,
         )
 
     async def _async_optional_list(self, method: Any, *args: Any) -> list[dict[str, Any]]:
@@ -275,6 +323,14 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
         except ReefBotApiError:
             _LOGGER.debug("Unable to fetch optional ReefBot data", exc_info=True)
             return []
+
+    async def _async_optional_value(self, method: Any, *args: Any) -> Any:
+        """Fetch optional scalar data without failing the whole coordinator."""
+        try:
+            return await method(*args)
+        except ReefBotApiError:
+            _LOGGER.debug("Unable to fetch optional ReefBot value", exc_info=True)
+            return None
 
     async def _async_fetch_parameter_results(
         self, results: dict[str, Any], tank_id: int | str

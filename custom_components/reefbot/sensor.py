@@ -63,8 +63,21 @@ async def async_setup_entry(
             _tank_value("Volume", "volume"),
         ),
         ReefBotConfiguredTestsSensor(coordinator),
+        ReefBotNotificationsSensor(coordinator),
+        ReefBotSafeMarginsSensor(coordinator),
+        ReefBotAlarmLogsSensor(coordinator),
+        ReefBotCalibrationPendingSensor(coordinator),
         ReefBotLastUpdateSensor(coordinator),
         ReefBotLastSuccessfulTestSensor(coordinator),
+        ReefBotMaintenanceComponentSensor(
+            coordinator, "syringe", "Syringe", ("syringe",)
+        ),
+        ReefBotMaintenanceComponentSensor(
+            coordinator, "waste", "Waste", ("waste",)
+        ),
+        ReefBotMaintenanceComponentSensor(
+            coordinator, "rodi", "RODI", ("rodi", "rodi tank", "ro tank")
+        ),
         *[ReefBotTubeSensor(coordinator, tube_number) for tube_number in range(1, 9)],
     ]
     async_add_entities(static_entities)
@@ -291,6 +304,235 @@ class ReefBotPendingOperationsSensor(ReefBotEntity, SensorEntity):
                 if isinstance(request, dict)
             ],
         }
+
+
+class ReefBotNotificationsSensor(ReefBotEntity, SensorEntity):
+    """Recent Reef Kinetics notifications."""
+
+    _attr_translation_key = "notifications"
+    _attr_icon = "mdi:bell-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "notifications")
+
+    @property
+    def native_value(self) -> int:
+        """Return unread notification count, falling back to fetched items."""
+        count = self.coordinator.data.unread_notifications_count
+        return count if count is not None else len(self.coordinator.data.notifications)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return recent notification details."""
+        return {
+            "unread_count": self.coordinator.data.unread_notifications_count,
+            "notifications": [
+                _notification_summary(notification)
+                for notification in self.coordinator.data.notifications[:10]
+                if isinstance(notification, dict)
+            ],
+        }
+
+
+class ReefBotSafeMarginsSensor(ReefBotEntity, SensorEntity):
+    """Configured ReefBot tank safe margins."""
+
+    _attr_translation_key = "safe_margins"
+    _attr_icon = "mdi:alert-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "safe_margins")
+
+    @property
+    def native_value(self) -> int:
+        """Return configured safe margin count."""
+        return len(self.coordinator.data.tank_alarms)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe margin details."""
+        return {
+            "safe_margins": [
+                _alarm_summary(alarm)
+                for alarm in self.coordinator.data.tank_alarms
+                if isinstance(alarm, dict)
+            ],
+        }
+
+
+class ReefBotAlarmLogsSensor(ReefBotEntity, SensorEntity):
+    """Recent ReefBot alarm logs."""
+
+    _attr_translation_key = "alarm_logs"
+    _attr_icon = "mdi:alert-clock-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "alarm_logs")
+
+    @property
+    def native_value(self) -> int:
+        """Return alarm log count."""
+        return len(self.coordinator.data.alarm_logs)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return alarm log details."""
+        return {
+            "logs": [
+                _alarm_log_summary(log)
+                for log in self.coordinator.data.alarm_logs[:10]
+                if isinstance(log, dict)
+            ],
+        }
+
+
+class ReefBotCalibrationPendingSensor(ReefBotEntity, SensorEntity):
+    """Pending calibration request count."""
+
+    _attr_translation_key = "pending_calibrations"
+    _attr_icon = "mdi:tune-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "pending_calibrations")
+
+    @property
+    def native_value(self) -> int:
+        """Return pending calibration request count."""
+        return len(self.coordinator.data.pending_calibration_requests)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return pending calibration request details."""
+        return {
+            "pending_calibrations": [
+                _calibration_request_summary(request)
+                for request in self.coordinator.data.pending_calibration_requests
+                if isinstance(request, dict)
+            ],
+            "size_types_count": len(self.coordinator.data.size_types),
+            "components_count": len(self.coordinator.data.components),
+        }
+
+
+class ReefBotMaintenanceComponentSensor(ReefBotEntity, SensorEntity):
+    """Maintenance state for one ReefBot component."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:counter"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ReefBotCoordinator,
+        component_key: str,
+        display_name: str,
+        match_terms: tuple[str, ...],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, f"maintenance_{component_key}")
+        self._display_name = display_name
+        self._match_terms = match_terms
+        self._attr_name = display_name
+
+    @property
+    def native_value(self) -> float | str | None:
+        """Return current component value."""
+        component = self._component()
+        if not component:
+            return None
+        return _coerce_number(
+            _first_present(
+                component,
+                (
+                    "CurrentValue",
+                    "currentValue",
+                    "Current",
+                    "current",
+                    "CurrentVolume",
+                    "currentVolume",
+                    "Value",
+                    "value",
+                ),
+            )
+        )
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        """Return component unit."""
+        component = self._component()
+        if not component:
+            return None
+        unit = _first_present(
+            component, ("Unit", "unit", "UnitName", "unitName", "ValueUnit", "valueUnit")
+        )
+        return str(unit) if unit is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return component details."""
+        component = self._component()
+        if not component:
+            return {"component_name": self._display_name}
+
+        current = _first_present(
+            component,
+            (
+                "CurrentValue",
+                "currentValue",
+                "Current",
+                "current",
+                "CurrentVolume",
+                "currentVolume",
+                "Value",
+                "value",
+            ),
+        )
+        capacity = _first_present(
+            component,
+            (
+                "SizeTypeValue",
+                "sizeTypeValue",
+                "Capacity",
+                "capacity",
+                "MaxValue",
+                "maxValue",
+                "TotalValue",
+                "totalValue",
+            ),
+        )
+        return {
+            "component_name": _component_name(component),
+            "component_id": _first_present(
+                component,
+                ("ComponentId", "componentId", "DeviceComponentId", "deviceComponentId"),
+            ),
+            "current_value": current,
+            "capacity": capacity,
+            "fill_percentage": _fill_percentage(current, capacity),
+            "unit": self.native_unit_of_measurement,
+            "size_type": _first_present(
+                component, ("SizeTypeName", "sizeTypeName", "SizeType", "sizeType")
+            ),
+        }
+
+    def _component(self) -> dict[str, Any] | None:
+        """Return matching component setting."""
+        for component in self.coordinator.data.component_settings:
+            name = _component_name(component)
+            if not name:
+                continue
+            normalized = slugify(name).replace("_", " ")
+            if any(term in normalized for term in self._match_terms):
+                return component
+        return None
 
 
 class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
@@ -631,6 +873,190 @@ def _operation_request_summary(
         "type": type_id,
         "type_name": coordinator.data.operation_type_name(type_id),
     }
+
+
+def _notification_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact notification row."""
+    return {
+        "id": _first_present(item, ("NotificationId", "notificationId", "Id", "id")),
+        "title": _first_present(item, ("Title", "title", "Subject", "subject")),
+        "message": _first_present(
+            item,
+            (
+                "Message",
+                "message",
+                "Body",
+                "body",
+                "Text",
+                "text",
+                "Description",
+                "description",
+                "NotificationMessage",
+                "notificationMessage",
+            ),
+        )
+        or _compact_string_values(item),
+        "date": _first_present(
+            item,
+            (
+                "AddedDateString",
+                "addedDateString",
+                "CreatedDate",
+                "createdDate",
+                "Date",
+                "date",
+            ),
+        ),
+        "read": _first_present(item, ("IsRead", "isRead", "Read", "read")),
+        "type": _first_present(
+            item, ("NotificationType", "notificationType", "Type", "type")
+        ),
+    }
+
+
+def _alarm_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact safe margin row."""
+    return {
+        "id": _first_present(item, ("AlarmId", "alarmId", "Id", "id")),
+        "parameter": _first_present(
+            item,
+            (
+                "OperationParameterName",
+                "operationParameterName",
+                "ParameterName",
+                "parameterName",
+                "Name",
+                "name",
+            ),
+        ),
+        "minimum": _first_present(
+            item, ("MinValue", "minValue", "Minimum", "minimum", "Min", "min")
+        ),
+        "maximum": _first_present(
+            item, ("MaxValue", "maxValue", "Maximum", "maximum", "Max", "max")
+        ),
+        "unit": _first_present(
+            item, ("ValueSuffixSymbol", "valueSuffixSymbol", "Unit", "unit")
+        ),
+        "enabled": _first_present(
+            item, ("IsEnabled", "isEnabled", "Enabled", "enabled", "IsActive", "isActive")
+        ),
+    }
+
+
+def _alarm_log_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact alarm log row."""
+    return {
+        "id": _first_present(item, ("AlarmLogId", "alarmLogId", "Id", "id")),
+        "parameter": _first_present(
+            item,
+            (
+                "OperationParameterName",
+                "operationParameterName",
+                "ParameterName",
+                "parameterName",
+                "Name",
+                "name",
+            ),
+        ),
+        "message": _first_present(
+            item, ("Message", "message", "Description", "description", "Text", "text")
+        )
+        or _compact_string_values(item),
+        "date": _first_present(
+            item, ("AddedDateString", "addedDateString", "Date", "date")
+        ),
+        "value": _first_present(item, ("Value", "value")),
+        "status": _first_present(item, ("Status", "status")),
+    }
+
+
+def _calibration_request_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact calibration request row."""
+    return {
+        "id": _first_present(
+            item,
+            (
+                "CalibrationRequestId",
+                "calibrationRequestId",
+                "OperationRequestId",
+                "operationRequestId",
+                "Id",
+                "id",
+            ),
+        ),
+        "component": _first_present(
+            item,
+            (
+                "ComponentName",
+                "componentName",
+                "Name",
+                "name",
+                "DeviceComponentName",
+                "deviceComponentName",
+            ),
+        ),
+        "device_name": _first_present(item, ("DeviceName", "deviceName")),
+        "added": _first_present(item, ("AddedDateString", "addedDateString")),
+        "status": _first_present(
+            item, ("RequestStatus", "requestStatus", "Status", "status")
+        ),
+        "message": _first_present(
+            item, ("RequestStatusMessage", "requestStatusMessage", "Message", "message")
+        ),
+    }
+
+
+def _component_name(item: dict[str, Any]) -> str | None:
+    """Return a component display name from a maintenance setting."""
+    value = _first_present(
+        item,
+        (
+            "ComponentName",
+            "componentName",
+            "DeviceComponentName",
+            "deviceComponentName",
+            "DisplayName",
+            "displayName",
+            "Name",
+            "name",
+        ),
+    )
+    if value:
+        return str(value)
+
+    nested = _first_present(item, ("Component", "component"))
+    if isinstance(nested, dict):
+        nested_value = _first_present(
+            nested,
+            (
+                "ComponentName",
+                "componentName",
+                "DisplayName",
+                "displayName",
+                "Name",
+                "name",
+            ),
+        )
+        if nested_value:
+            return str(nested_value)
+    return None
+
+
+def _compact_string_values(item: dict[str, Any], limit: int = 4) -> str | None:
+    """Return a short fallback text from string values in an API row."""
+    values: list[str] = []
+    for value in item.values():
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not text or len(text) > 240:
+            continue
+        if text not in values:
+            values.append(text)
+        if len(values) >= limit:
+            break
+    return " | ".join(values) if values else None
 
 
 def _latest_device_result_for_operation(
