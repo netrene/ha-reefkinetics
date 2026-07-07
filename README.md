@@ -22,6 +22,7 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Tube fill-level sensors named with their configured chemicals and volumes.
 - Configured tests sensor derived from installed chemicals and available operations.
 - Individual configured test sensors with tube and chemical mappings.
+- Current operation and pending operation sensors for manually started or queued tests.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included
@@ -59,6 +60,8 @@ The default polling interval is 5 minutes. ReefBot tests are usually much less f
 - `POST /api/APIService/GetUserDevices`
 - `POST /api/APIService/GetUserTanks`
 - `POST /api/APIService/GetOperationResultsByTankIdWithColorsV2`
+- `POST /api/APIService/GetPendingOperationRequestsByTank`
+- `POST /api/APIService/GetOperationRequestsHistoryByTankId`
 
 ## Roadmap
 

@@ -67,6 +67,15 @@ async def async_get_config_entry_diagnostics(
         "available_operations_count": (
             len(data.available_operations) if data else 0
         ),
+        "pending_operation_requests": [
+            _operation_request_summary(request)
+            for request in (data.pending_operation_requests if data else [])
+        ],
+        "operation_request_history": [
+            _operation_request_summary(request)
+            for request in (data.operation_request_history[:10] if data else [])
+        ],
+        "operation_types": _redact(data.operation_types if data else []),
         "last_update_success": coordinator.last_update_success if coordinator else None,
         "last_update_success_time": (
             coordinator.last_successful_refresh.isoformat()
@@ -94,3 +103,19 @@ def _tube_number(tube: dict[str, Any]) -> int | None:
         return int(tube.get("PositionIndex")) + 1
     except (TypeError, ValueError):
         return None
+
+
+def _operation_request_summary(request: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact operation request diagnostic row."""
+    return {
+        "operation_request_id": request.get("OperationRequestId"),
+        "name": request.get("Name"),
+        "device_name": request.get("DeviceName"),
+        "added": request.get("AddedDateString"),
+        "expected_completion_time": request.get("ExpectedCompletionTime"),
+        "request_status": request.get("RequestStatus"),
+        "request_status_message": request.get("RequestStatusMessage"),
+        "value": request.get("Value"),
+        "display_value": request.get("ValueDisplayString"),
+        "type": request.get("Type"),
+    }

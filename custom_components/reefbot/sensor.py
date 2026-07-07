@@ -52,6 +52,8 @@ async def async_setup_entry(
             "vials_number",
             _device_value("VialsNumber", "vialsNumber"),
         ),
+        ReefBotCurrentOperationSensor(coordinator),
+        ReefBotPendingOperationsSensor(coordinator),
         ReefBotTankSensor(
             coordinator, "tank_name", "tank_name", _tank_value("Name", "name")
         ),
@@ -225,6 +227,69 @@ class ReefBotConfiguredTestsSensor(ReefBotEntity, SensorEntity):
                 _device_result_summary(result)
                 for result in self.coordinator.data.device_results[:5]
                 if isinstance(result, dict)
+            ],
+        }
+
+
+class ReefBotCurrentOperationSensor(ReefBotEntity, SensorEntity):
+    """Currently pending ReefBot operation request."""
+
+    _attr_translation_key = "current_operation"
+    _attr_icon = "mdi:progress-clock"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "current_operation")
+
+    @property
+    def native_value(self) -> str:
+        """Return the current operation name or idle."""
+        request = self.coordinator.data.current_operation_request
+        name = _first_present(request, ("Name", "name"))
+        return str(name) if name is not None else "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return details about the current operation request."""
+        request = self.coordinator.data.current_operation_request
+        if not request:
+            return {"pending": False}
+        return {
+            "pending": True,
+            **_operation_request_summary(request, self.coordinator),
+        }
+
+
+class ReefBotPendingOperationsSensor(ReefBotEntity, SensorEntity):
+    """Number of pending ReefBot operation requests."""
+
+    _attr_translation_key = "pending_operations"
+    _attr_icon = "mdi:playlist-clock"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "pending_operations")
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of currently pending requests."""
+        return len(self.coordinator.data.pending_operation_requests)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return pending request details and recent request history."""
+        return {
+            "pending": [
+                _operation_request_summary(request, self.coordinator)
+                for request in self.coordinator.data.pending_operation_requests[:5]
+                if isinstance(request, dict)
+            ],
+            "recent_history": [
+                _operation_request_summary(request, self.coordinator)
+                for request in self.coordinator.data.operation_request_history[:10]
+                if isinstance(request, dict)
             ],
         }
 
@@ -536,6 +601,36 @@ def _device_result_summary(item: dict[str, Any]) -> dict[str, Any]:
         "value": _first_present(item, ("Value", "value")),
         "unit": _first_present(item, ("ValueSuffixSymbol", "valueSuffixSymbol")),
         "date": _first_present(item, ("AddedDateString", "addedDateString")),
+    }
+
+
+def _operation_request_summary(
+    item: dict[str, Any], coordinator: ReefBotCoordinator
+) -> dict[str, Any]:
+    """Return a compact operation request summary."""
+    type_id = _first_present(item, ("Type", "type", "TypeId", "typeId"))
+    return {
+        "operation_request_id": _first_present(
+            item, ("OperationRequestId", "operationRequestId")
+        ),
+        "name": _first_present(item, ("Name", "name")),
+        "device_name": _first_present(item, ("DeviceName", "deviceName")),
+        "added": _first_present(item, ("AddedDateString", "addedDateString")),
+        "expected_completion_time": _first_present(
+            item, ("ExpectedCompletionTime", "expectedCompletionTime")
+        ),
+        "request_status": _first_present(item, ("RequestStatus", "requestStatus")),
+        "request_status_message": _first_present(
+            item, ("RequestStatusMessage", "requestStatusMessage")
+        ),
+        "value": _first_present(item, ("Value", "value")),
+        "display_value": _first_present(
+            item, ("ValueDisplayString", "valueDisplayString")
+        ),
+        "solution_name": _first_present(item, ("SolutionName", "solutionName")),
+        "volume": _first_present(item, ("Volume", "volume")),
+        "type": type_id,
+        "type_name": coordinator.data.operation_type_name(type_id),
     }
 
 

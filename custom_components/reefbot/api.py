@@ -39,6 +39,13 @@ ENDPOINT_CHEMICAL_SETTINGS = "/api/APIService/GetDeviceChemicalSettings"
 ENDPOINT_AVAILABLE_OPERATIONS = "/api/APIService/GetAvailableOperations"
 ENDPOINT_SOURCE_SETTINGS = "/api/APIService/GetDeviceSourceSettings"
 ENDPOINT_DEVICE_RESULTS = "/api/APIService/GetOperationResultsByDeviceIdV2"
+ENDPOINT_PENDING_OPERATION_REQUESTS = (
+    "/api/APIService/GetPendingOperationRequestsByTank"
+)
+ENDPOINT_OPERATION_REQUEST_HISTORY = (
+    "/api/APIService/GetOperationRequestsHistoryByTankId"
+)
+ENDPOINT_OPERATION_TYPES = "/api/APIService/GetOperationTypes"
 
 
 class ReefBotApiError(Exception):
@@ -175,6 +182,31 @@ class ReefBotApiClient:
         """Return latest operation results for a ReefBot device."""
         payload = await self._post(ENDPOINT_DEVICE_RESULTS, {"DeviceId": device_id})
         return self._extract_list(payload, ("Results", "results"))
+
+    async def get_pending_operation_requests(
+        self, tank_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return currently pending operation requests for a tank."""
+        payload = await self._post(
+            ENDPOINT_PENDING_OPERATION_REQUESTS, {"tankId": tank_id}
+        )
+        return self._extract_list(payload, ("Requests", "requests"))
+
+    async def get_operation_request_history(
+        self, tank_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return recent operation request history for a tank."""
+        payload = await self._post(
+            ENDPOINT_OPERATION_REQUEST_HISTORY, {"tankId": tank_id}
+        )
+        return self._extract_list(
+            payload, ("Requests", "requests", "History", "history")
+        )
+
+    async def get_operation_types(self) -> list[dict[str, Any]]:
+        """Return ReefBot operation request type labels."""
+        payload = await self._post(ENDPOINT_OPERATION_TYPES)
+        return self._extract_list(payload, ("Types", "types"))
 
     async def _post(
         self,

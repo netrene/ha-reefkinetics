@@ -38,6 +38,9 @@ class ReefBotData:
     available_operations: list[dict[str, Any]]
     source_settings: list[dict[str, Any]]
     device_results: list[dict[str, Any]]
+    pending_operation_requests: list[dict[str, Any]]
+    operation_request_history: list[dict[str, Any]]
+    operation_types: list[dict[str, Any]]
 
     @property
     def device(self) -> dict[str, Any] | None:
@@ -131,6 +134,29 @@ class ReefBotData:
                 configured.append(operation)
         return configured
 
+    @property
+    def current_operation_request(self) -> dict[str, Any] | None:
+        """Return the first pending operation request, if any."""
+        if not self.pending_operation_requests:
+            return None
+        return self.pending_operation_requests[0]
+
+    def operation_type_name(self, type_id: Any) -> str | None:
+        """Return the display name for an operation request type."""
+        if type_id is None:
+            return None
+        type_text = str(type_id)
+        for operation_type in self.operation_types:
+            candidate = _first_present(
+                operation_type, ("TypeId", "typeId", "Id", "id")
+            )
+            if candidate is not None and str(candidate) == type_text:
+                value = _first_present(
+                    operation_type, ("TypeName", "typeName", "Name", "name")
+                )
+                return str(value) if value is not None else None
+        return None
+
 
 class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
     """Coordinate ReefBot cloud polling."""
@@ -205,6 +231,23 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
                 if device_id
                 else []
             )
+            pending_operation_requests = (
+                await self._async_optional_list(
+                    self.client.get_pending_operation_requests, tank_id
+                )
+                if tank_id
+                else []
+            )
+            operation_request_history = (
+                await self._async_optional_list(
+                    self.client.get_operation_request_history, tank_id
+                )
+                if tank_id
+                else []
+            )
+            operation_types = await self._async_optional_list(
+                self.client.get_operation_types
+            )
         except ReefBotAuthError as err:
             raise ConfigEntryAuthFailed("ReefBot authentication failed") from err
         except ReefBotApiError as err:
@@ -220,6 +263,9 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
             available_operations=available_operations,
             source_settings=source_settings,
             device_results=device_results,
+            pending_operation_requests=pending_operation_requests,
+            operation_request_history=operation_request_history,
+            operation_types=operation_types,
         )
 
     async def _async_optional_list(self, method: Any, *args: Any) -> list[dict[str, Any]]:

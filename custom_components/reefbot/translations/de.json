@@ -49,6 +49,9 @@
       "configured_tests": {
         "name": "Konfigurierte Tests"
       },
+      "current_operation": {
+        "name": "Aktueller Vorgang"
+      },
       "firmware_version": {
         "name": "Firmware-Version"
       },
@@ -57,6 +60,9 @@
       },
       "last_update": {
         "name": "Letzte Aktualisierung"
+      },
+      "pending_operations": {
+        "name": "Ausstehende Vorgänge"
       },
       "serial_number": {
         "name": "Seriennummer"
