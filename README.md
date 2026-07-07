@@ -18,6 +18,7 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Online status binary sensor.
 - Firmware, serial number, vial count, tank name, and tank volume sensors.
 - Dynamic sensors for all parameters returned by the ReefBot API.
+- Compact per-parameter result history exposed as sensor attributes.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included

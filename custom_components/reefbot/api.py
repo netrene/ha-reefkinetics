@@ -32,6 +32,9 @@ ENDPOINT_LOGIN = "/api/auth/AuthorizeAndLoginWithPortal"
 ENDPOINT_DEVICES = "/api/APIService/GetUserDevices"
 ENDPOINT_TANKS = "/api/APIService/GetUserTanks"
 ENDPOINT_RESULTS = "/api/APIService/GetOperationResultsByTankIdWithColorsV2"
+ENDPOINT_PARAMETER_RESULTS = (
+    "/api/APIService/GetOperationResultsByTankIdOperationParameterIdWithColors"
+)
 
 
 class ReefBotApiError(Exception):
@@ -129,6 +132,19 @@ class ReefBotApiClient:
     async def get_operation_results(self, tank_id: int | str) -> dict[str, Any]:
         """Return latest operation results for a tank."""
         return await self._post(ENDPOINT_RESULTS, {"tankId": tank_id})
+
+    async def get_parameter_results(
+        self, tank_id: int | str, operation_parameter_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return detailed operation result history for one parameter."""
+        payload = await self._post(
+            ENDPOINT_PARAMETER_RESULTS,
+            {
+                "tankId": tank_id,
+                "OperationParameterId": operation_parameter_id,
+            },
+        )
+        return self._extract_list(payload, ("Results", "results"))
 
     async def _post(
         self,

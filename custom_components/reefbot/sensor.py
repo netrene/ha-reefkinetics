@@ -151,8 +151,13 @@ class ReefBotLastSuccessfulTestSensor(ReefBotEntity, SensorEntity):
             for parameter in self.coordinator.data.parameters
             if (
                 parsed := _parse_datetime(
-                    _latest_history_value(
-                        parameter, "AddedDateString", "addedDateString", "Date", "date"
+                    _history_value(
+                        self.coordinator.data.history_for_parameter(parameter),
+                        0,
+                        "AddedDateString",
+                        "addedDateString",
+                        "Date",
+                        "date",
                     )
                 )
             )
@@ -181,7 +186,9 @@ class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
         parameter = self._parameter()
         if not parameter:
             return None
-        value = _latest_history_value(parameter, "Value", "value")
+        value = _history_value(
+            self.coordinator.data.history_for_parameter(parameter), 0, "Value", "value"
+        )
         return _coerce_number(value)
 
     @property
@@ -190,13 +197,45 @@ class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
         parameter = self._parameter()
         if not parameter:
             return {"parameter_name": self._parameter_name}
+        history = self.coordinator.data.history_for_parameter(parameter)
+        latest = history[0] if history else {}
+        previous = history[1] if len(history) > 1 else {}
         return {
             "parameter_name": self._parameter_name,
-            "last_test": _latest_history_value(
-                parameter, "AddedDateString", "addedDateString", "Date", "date"
+            "last_test": _history_value(
+                history, 0, "AddedDateString", "addedDateString", "Date", "date"
             ),
-            "raw_unit": _first_present(
-                parameter, ("Unit", "unit", "UnitName", "unitName")
+            "previous_value": _history_value(history, 1, "Value", "value"),
+            "previous_test": _history_value(
+                history, 1, "AddedDateString", "addedDateString", "Date", "date"
+            ),
+            "brand": _first_present(
+                latest,
+                ("OperationMethodName", "operationMethodName", "Brand", "brand"),
+            ),
+            "operation_name": _first_present(
+                latest, ("OperationName", "operationName")
+            ),
+            "operation_method": _first_present(
+                latest, ("OperationMethodName", "operationMethodName")
+            ),
+            "min_range": _first_present(latest, ("MinRange", "minRange")),
+            "max_range": _first_present(latest, ("MaxRange", "maxRange")),
+            "result_status_id": _first_present(
+                latest, ("ResultStatusId", "resultStatusId")
+            ),
+            "history_count": len(history),
+            "history": [
+                _history_summary(item)
+                for item in history[:5]
+                if isinstance(item, dict)
+            ],
+            "raw_unit": _history_value(
+                history, 0, "ValueSuffixSymbol", "valueSuffixSymbol"
+            )
+            or _first_present(
+                latest,
+                ("Unit", "unit", "UnitName", "unitName"),
             ),
             "tank_id": _first_present(
                 self.coordinator.data.tank, ("TankId", "tankId", "id")
@@ -218,8 +257,9 @@ class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
     def _unit(self) -> str | None:
         """Return the unit for the parameter."""
         parameter = self._parameter()
-        api_unit = _latest_history_value(
-            parameter, "ValueSuffixSymbol", "valueSuffixSymbol"
+        history = self.coordinator.data.history_for_parameter(parameter) if parameter else []
+        api_unit = _history_value(
+            history, 0, "ValueSuffixSymbol", "valueSuffixSymbol"
         ) or _first_present(parameter, ("Unit", "unit", "UnitName", "unitName"))
         if api_unit:
             return str(api_unit)
@@ -253,15 +293,30 @@ def _parameter_name(parameter: dict[str, Any]) -> str | None:
     return str(value) if value else None
 
 
-def _latest_history_value(parameter: dict[str, Any], *keys: str) -> Any:
-    """Return a value from the newest operation history item."""
-    history = _first_present(parameter, ("OperationsHistory", "operationsHistory"))
-    if not isinstance(history, list) or not history:
+def _history_value(history: list[dict[str, Any]], index: int, *keys: str) -> Any:
+    """Return a value from an operation history item."""
+    if len(history) <= index:
         return None
-    latest = history[0]
-    if not isinstance(latest, dict):
+    item = history[index]
+    if not isinstance(item, dict):
         return None
-    return _first_present(latest, keys)
+    return _first_present(item, keys)
+
+
+def _history_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact history row safe for entity attributes."""
+    return {
+        "date": _first_present(item, ("AddedDateString", "addedDateString")),
+        "value": _first_present(item, ("Value", "value")),
+        "display_value": _first_present(
+            item, ("ValueDisplayString", "valueDisplayString")
+        ),
+        "brand": _first_present(
+            item, ("OperationMethodName", "operationMethodName", "Brand", "brand")
+        ),
+        "operation": _first_present(item, ("OperationName", "operationName")),
+        "device": _first_present(item, ("DeviceName", "deviceName")),
+    }
 
 
 def _first_present(data: dict[str, Any] | None, keys: tuple[str, ...]) -> Any:
