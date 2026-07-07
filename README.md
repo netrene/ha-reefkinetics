@@ -13,7 +13,7 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 ## Features
 
 - UI-based setup through Home Assistant.
-- Token-based authentication for initial testing.
+- Reef Kinetics dashboard login through the Home Assistant UI.
 - Cloud polling via `https://gateway.reefkinetics.com`.
 - Online status binary sensor.
 - Firmware, serial number, vial count, tank name, and tank volume sensors.
@@ -35,11 +35,12 @@ Maintenance functions are intentionally out of scope for the first version.
 
 ## Setup
 
-The initial setup requires values observed from an authenticated Reef Kinetics dashboard session:
+The setup flow asks for your Reef Kinetics dashboard login:
 
-- Token
-- User ID
-- Device token
+- Email
+- Password
+
+The password is used once to request a cloud token and is not stored in the Home Assistant config entry. The integration stores the returned token, token expiry, user ID, and a generated web device token. If the token expires, Home Assistant will start a reauthentication flow and ask for the password again.
 
 The integration then calls the cloud API to discover devices and tanks. If more than one tank is returned, Home Assistant will ask which tank to use.
 
@@ -57,9 +58,7 @@ The default polling interval is 5 minutes. ReefBot tests are usually much less f
 
 ## Roadmap
 
-- Username/password login flow if the login endpoint is captured and understood.
-- Reauth flow if tokens expire.
+- Read-only maintenance sensors for reagents, components, and calibration status.
 - Options flow for polling interval.
 - Better parameter metadata once more API samples are available.
 - Optional support for multiple tanks per account.
-

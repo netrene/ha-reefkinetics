@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import ReefBotApiClient, ReefBotApiError, ReefBotAuthError
 from .const import (
     CONF_DEVICE_ID,
+    CONF_TOKEN_EXPIRY,
     CONF_TANK_ID,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -76,6 +77,8 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
     async def _async_update_data(self) -> ReefBotData:
         """Fetch latest ReefBot data."""
         try:
+            if _token_expired(self.entry.data.get(CONF_TOKEN_EXPIRY)):
+                raise ReefBotAuthError("ReefBot token has expired")
             devices = await self.client.get_user_devices()
             tanks = await self.client.get_user_tanks()
             devices = self._prefer_configured(
@@ -83,7 +86,9 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
                 CONF_DEVICE_ID,
                 ("DeviceId", "deviceId", "id"),
             )
-            tanks = self._prefer_configured(tanks, CONF_TANK_ID, ("TankId", "tankId", "id"))
+            tanks = self._prefer_configured(
+                tanks, CONF_TANK_ID, ("TankId", "tankId", "id")
+            )
             tank_id = self.entry.data.get(CONF_TANK_ID)
             if tank_id is None and tanks:
                 tank_id = tanks[0].get("TankId", tanks[0].get("tankId"))
@@ -115,3 +120,29 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
         ]
         others = [item for item in items if item not in selected]
         return selected + others
+
+
+def _token_expired(value: Any) -> bool:
+    """Return whether a stored token expiry is in the past."""
+    if not value or not isinstance(value, str):
+        return False
+
+    text = value.strip().replace("Z", "+00:00")
+    if "." in text:
+        prefix, suffix = text.split(".", 1)
+        fraction = suffix
+        timezone = ""
+        for separator in ("+", "-"):
+            if separator in suffix:
+                fraction, timezone_part = suffix.split(separator, 1)
+                timezone = f"{separator}{timezone_part}"
+                break
+        text = f"{prefix}.{fraction[:6]}{timezone}"
+
+    try:
+        expiry = datetime.fromisoformat(text)
+    except ValueError:
+        return False
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=UTC)
+    return expiry <= datetime.now(UTC)

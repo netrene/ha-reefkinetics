@@ -7,6 +7,9 @@ from datetime import timedelta
 DOMAIN = "reefbot"
 
 CONF_TOKEN = "token"
+CONF_TOKEN_EXPIRY = "token_expiry"
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
 CONF_USER_ID = "user_id"
 CONF_DEVICE_TOKEN = "device_token"
 CONF_TANK_ID = "tank_id"
@@ -28,6 +31,9 @@ CONF_PORTAL_ID = "portal_id"
 
 SENSITIVE_KEYS = {
     CONF_TOKEN,
+    CONF_TOKEN_EXPIRY,
+    CONF_USERNAME,
+    CONF_PASSWORD,
     CONF_DEVICE_TOKEN,
     CONF_USER_ID,
     CONF_PORTAL_APP_SECRET,
@@ -49,3 +55,6 @@ UNIT_MAP = {
     "silicate": "mg/L",
 }
 
+EXCLUDED_PARAMETER_NAMES = {
+    "device_hardware_test",
+}

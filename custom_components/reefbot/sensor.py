@@ -17,7 +17,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import slugify
 
-from .const import DOMAIN, UNIT_MAP
+from .const import DOMAIN, EXCLUDED_PARAMETER_NAMES, UNIT_MAP
 from .coordinator import ReefBotCoordinator
 from .entity import ReefBotEntity
 
@@ -32,11 +32,33 @@ async def async_setup_entry(
     known_parameters: set[str] = set()
 
     static_entities: list[SensorEntity] = [
-        ReefBotDeviceSensor(coordinator, "firmware_version", "firmware_version", _device_value("VersionNumber", "versionNumber", "firmware")),
-        ReefBotDeviceSensor(coordinator, "serial_number", "serial_number", _device_value("SerialNumber", "serialNumber", "serial")),
-        ReefBotDeviceSensor(coordinator, "vials_number", "vials_number", _device_value("VialsNumber", "vialsNumber")),
-        ReefBotTankSensor(coordinator, "tank_name", "tank_name", _tank_value("Name", "name")),
-        ReefBotTankSensor(coordinator, "tank_volume", "tank_volume", _tank_value("Volume", "volume")),
+        ReefBotDeviceSensor(
+            coordinator,
+            "firmware_version",
+            "firmware_version",
+            _device_value("VersionNumber", "versionNumber", "firmware"),
+        ),
+        ReefBotDeviceSensor(
+            coordinator,
+            "serial_number",
+            "serial_number",
+            _device_value("SerialNumber", "serialNumber", "serial"),
+        ),
+        ReefBotDeviceSensor(
+            coordinator,
+            "vials_number",
+            "vials_number",
+            _device_value("VialsNumber", "vialsNumber"),
+        ),
+        ReefBotTankSensor(
+            coordinator, "tank_name", "tank_name", _tank_value("Name", "name")
+        ),
+        ReefBotTankSensor(
+            coordinator,
+            "tank_volume",
+            "tank_volume",
+            _tank_value("Volume", "volume"),
+        ),
         ReefBotLastUpdateSensor(coordinator),
         ReefBotLastSuccessfulTestSensor(coordinator),
     ]
@@ -50,6 +72,8 @@ async def async_setup_entry(
             if not name:
                 continue
             parameter_key = slugify(name)
+            if parameter_key in EXCLUDED_PARAMETER_NAMES:
+                continue
             if parameter_key in known_parameters:
                 continue
             known_parameters.add(parameter_key)
@@ -58,7 +82,9 @@ async def async_setup_entry(
             async_add_entities(entities)
 
     add_parameter_entities()
-    remove_listener: CALLBACK_TYPE = coordinator.async_add_listener(add_parameter_entities)
+    remove_listener: CALLBACK_TYPE = coordinator.async_add_listener(
+        add_parameter_entities
+    )
     entry.async_on_unload(remove_listener)
 
 
@@ -123,7 +149,13 @@ class ReefBotLastSuccessfulTestSensor(ReefBotEntity, SensorEntity):
         dates = [
             parsed
             for parameter in self.coordinator.data.parameters
-            if (parsed := _parse_datetime(_latest_history_value(parameter, "AddedDateString", "addedDateString", "Date", "date")))
+            if (
+                parsed := _parse_datetime(
+                    _latest_history_value(
+                        parameter, "AddedDateString", "addedDateString", "Date", "date"
+                    )
+                )
+            )
         ]
         return max(dates) if dates else None
 
@@ -163,8 +195,12 @@ class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
             "last_test": _latest_history_value(
                 parameter, "AddedDateString", "addedDateString", "Date", "date"
             ),
-            "raw_unit": _first_present(parameter, ("Unit", "unit", "UnitName", "unitName")),
-            "tank_id": _first_present(self.coordinator.data.tank, ("TankId", "tankId", "id")),
+            "raw_unit": _first_present(
+                parameter, ("Unit", "unit", "UnitName", "unitName")
+            ),
+            "tank_id": _first_present(
+                self.coordinator.data.tank, ("TankId", "tankId", "id")
+            ),
             "tank_name": _first_present(self.coordinator.data.tank, ("Name", "name")),
             "device_id": _first_present(
                 self.coordinator.data.device, ("DeviceId", "deviceId", "id")
@@ -182,7 +218,9 @@ class ReefBotParameterSensor(ReefBotEntity, SensorEntity):
     def _unit(self) -> str | None:
         """Return the unit for the parameter."""
         parameter = self._parameter()
-        api_unit = _first_present(parameter, ("Unit", "unit", "UnitName", "unitName"))
+        api_unit = _latest_history_value(
+            parameter, "ValueSuffixSymbol", "valueSuffixSymbol"
+        ) or _first_present(parameter, ("Unit", "unit", "UnitName", "unitName"))
         if api_unit:
             return str(api_unit)
         return UNIT_MAP.get(self._parameter_key)

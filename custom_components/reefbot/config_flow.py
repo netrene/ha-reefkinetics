@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
@@ -20,19 +22,28 @@ from .api import (
 from .const import (
     CONF_DEVICE_ID,
     CONF_DEVICE_TOKEN,
+    CONF_PASSWORD,
     CONF_TANK_ID,
     CONF_TANK_NAME,
     CONF_TOKEN,
+    CONF_TOKEN_EXPIRY,
+    CONF_USERNAME,
     CONF_USER_ID,
     DOMAIN,
 )
 
 
-async def validate_input(
-    hass: HomeAssistant, data: dict[str, Any]
-) -> dict[str, Any]:
+async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate credentials and discover ReefBot devices and tanks."""
-    client = ReefBotApiClient(async_get_clientsession(hass), data)
+    session = async_get_clientsession(hass)
+    client = ReefBotApiClient(session, data)
+    if CONF_USERNAME in data and CONF_PASSWORD in data:
+        login = await client.login(data[CONF_USERNAME], data[CONF_PASSWORD])
+        data[CONF_TOKEN] = login.token
+        data[CONF_TOKEN_EXPIRY] = login.token_expiry
+        data[CONF_USER_ID] = login.user_id
+        client = ReefBotApiClient(session, data)
+
     devices = await client.get_user_devices()
     tanks = await client.get_user_tanks()
 
@@ -42,6 +53,15 @@ async def validate_input(
         raise NoTanksFound
 
     return {"devices": devices, "tanks": tanks}
+
+
+async def refresh_login(hass: HomeAssistant, data: dict[str, Any]) -> None:
+    """Refresh login token fields in a config entry data dict."""
+    client = ReefBotApiClient(async_get_clientsession(hass), data)
+    login = await client.login(data[CONF_USERNAME], data[CONF_PASSWORD])
+    data[CONF_TOKEN] = login.token
+    data[CONF_TOKEN_EXPIRY] = login.token_expiry
+    data[CONF_USER_ID] = login.user_id
 
 
 class ReefBotConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -54,6 +74,7 @@ class ReefBotConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._user_data: dict[str, Any] = {}
         self._devices: list[dict[str, Any]] = []
         self._tanks: list[dict[str, Any]] = []
+        self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -63,9 +84,9 @@ class ReefBotConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             data = {
-                CONF_TOKEN: user_input[CONF_TOKEN].strip(),
-                CONF_USER_ID: user_input[CONF_USER_ID],
-                CONF_DEVICE_TOKEN: user_input[CONF_DEVICE_TOKEN].strip(),
+                CONF_USERNAME: user_input[CONF_USERNAME].strip(),
+                CONF_PASSWORD: user_input[CONF_PASSWORD],
+                CONF_DEVICE_TOKEN: _generate_device_token(),
             }
 
             try:
@@ -83,6 +104,7 @@ class ReefBotConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:
                 errors["base"] = "unknown"
             else:
+                data.pop(CONF_PASSWORD, None)
                 self._user_data = data
                 self._devices = info["devices"]
                 self._tanks = info["tanks"]
@@ -94,9 +116,73 @@ class ReefBotConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_TOKEN): str,
-                    vol.Required(CONF_USER_ID): int,
-                    vol.Required(CONF_DEVICE_TOKEN): str,
+                    vol.Required(CONF_USERNAME): str,
+                    vol.Required(CONF_PASSWORD): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.PASSWORD
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """Handle reauthentication when the token expires."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Ask for the account password and refresh stored token data."""
+        errors: dict[str, str] = {}
+        if self._reauth_entry is None:
+            return self.async_abort(reason="reauth_entry_missing")
+
+        username = self._reauth_entry.data.get(CONF_USERNAME)
+        if not username:
+            return self.async_abort(reason="reauth_not_supported")
+
+        if user_input is not None:
+            data = dict(self._reauth_entry.data)
+            data[CONF_PASSWORD] = user_input[CONF_PASSWORD]
+
+            try:
+                await refresh_login(self.hass, data)
+            except ReefBotAuthError:
+                errors["base"] = "invalid_auth"
+            except ReefBotCannotConnect:
+                errors["base"] = "cannot_connect"
+            except ReefBotResponseError:
+                errors["base"] = "invalid_response"
+            except Exception:
+                errors["base"] = "unknown"
+            else:
+                data.pop(CONF_PASSWORD, None)
+                self.hass.config_entries.async_update_entry(
+                    self._reauth_entry,
+                    data=data,
+                )
+                await self.hass.config_entries.async_reload(
+                    self._reauth_entry.entry_id
+                )
+                return self.async_abort(reason="reauth_successful")
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            description_placeholders={"username": str(username)},
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PASSWORD): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.PASSWORD
+                        )
+                    )
                 }
             ),
             errors=errors,
@@ -184,10 +270,14 @@ def _tank_label(tank: dict[str, Any]) -> str:
     return f"{name} ({tank_id})" if tank_id is not None else str(name)
 
 
+def _generate_device_token() -> str:
+    """Generate a stable-looking web device token for Reef Kinetics."""
+    return f"DEVICETOKEN-WEB-{uuid4()}"
+
+
 class NoDevicesFound(HomeAssistantError):
     """No ReefBot devices were returned."""
 
 
 class NoTanksFound(HomeAssistantError):
     """No ReefBot tanks were returned."""
-

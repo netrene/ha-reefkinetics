@@ -3,11 +3,17 @@
     "step": {
       "user": {
         "title": "Reef Kinetics ReefBot",
-        "description": "Enter the credentials from an authenticated Reef Kinetics dashboard session.",
+        "description": "Enter your Reef Kinetics dashboard login. The password is only used to request a cloud token and is not stored.",
         "data": {
-          "token": "Token",
-          "user_id": "User ID",
-          "device_token": "Device token"
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Reef Kinetics ReefBot",
+        "description": "Enter the password for {username} to renew the Reef Kinetics cloud token.",
+        "data": {
+          "password": "Password"
         }
       },
       "tank": {
@@ -27,7 +33,10 @@
       "unknown": "Unexpected error."
     },
     "abort": {
-      "already_configured": "This ReefBot tank is already configured."
+      "already_configured": "This ReefBot tank is already configured.",
+      "reauth_entry_missing": "The integration entry could not be found.",
+      "reauth_not_supported": "This entry was created with token-based setup and cannot be reauthenticated with a password.",
+      "reauth_successful": "Reauthentication was successful."
     }
   },
   "entity": {
@@ -61,4 +70,3 @@
     }
   }
 }
-

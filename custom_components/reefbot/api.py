@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import dataclass
 import logging
 from typing import Any
 
@@ -27,6 +28,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+ENDPOINT_LOGIN = "/api/auth/AuthorizeAndLoginWithPortal"
 ENDPOINT_DEVICES = "/api/APIService/GetUserDevices"
 ENDPOINT_TANKS = "/api/APIService/GetUserTanks"
 ENDPOINT_RESULTS = "/api/APIService/GetOperationResultsByTankIdWithColorsV2"
@@ -48,6 +50,15 @@ class ReefBotResponseError(ReefBotApiError):
     """Raised when the API returns an unexpected response."""
 
 
+@dataclass(slots=True)
+class ReefBotLoginResult:
+    """Successful Reef Kinetics login result."""
+
+    token: str
+    token_expiry: str | None
+    user_id: int
+
+
 class ReefBotApiClient:
     """Small async client for the Reef Kinetics cloud gateway."""
 
@@ -55,8 +66,8 @@ class ReefBotApiClient:
         """Initialize the API client."""
         self._session = session
         self._base_url = str(config.get(CONF_BASE_URL, DEFAULT_BASE_URL)).rstrip("/")
-        self._token = str(config[CONF_TOKEN])
-        self._user_id = config[CONF_USER_ID]
+        self._token = str(config.get(CONF_TOKEN, ""))
+        self._user_id = config.get(CONF_USER_ID)
         self._device_token = str(config[CONF_DEVICE_TOKEN])
         self._portal_app_id = str(
             config.get(CONF_PORTAL_APP_ID, DEFAULT_PORTAL_APP_ID)
@@ -68,6 +79,42 @@ class ReefBotApiClient:
             config.get(CONF_DEVICE_PLATFORM, DEFAULT_DEVICE_PLATFORM)
         )
         self._portal_id = config.get(CONF_PORTAL_ID, DEFAULT_PORTAL_ID)
+
+    async def login(self, username: str, password: str) -> ReefBotLoginResult:
+        """Authenticate with Reef Kinetics and return a token."""
+        data = await self._post(
+            ENDPOINT_LOGIN,
+            {
+                "PortalUsername": username,
+                "PortalPassword": password,
+            },
+            authenticated=False,
+        )
+        login_data = data.get("Data", data.get("data"))
+        if not isinstance(login_data, dict):
+            raise ReefBotResponseError("Reef Kinetics login returned no data")
+
+        token = login_data.get("Token", login_data.get("token"))
+        user_id = login_data.get(
+            "UserId", login_data.get("UserID", login_data.get("userId"))
+        )
+        if not token or user_id is None:
+            raise ReefBotAuthError("Reef Kinetics login did not return credentials")
+
+        try:
+            user_id_int = int(user_id)
+        except (TypeError, ValueError) as err:
+            raise ReefBotResponseError(
+                "Reef Kinetics login returned invalid user ID"
+            ) from err
+
+        return ReefBotLoginResult(
+            token=str(token),
+            token_expiry=login_data.get(
+                "TokenExpiry", login_data.get("tokenExpiry")
+            ),
+            user_id=user_id_int,
+        )
 
     async def get_user_devices(self) -> list[dict[str, Any]]:
         """Return ReefBot devices linked to the user."""
@@ -84,11 +131,15 @@ class ReefBotApiClient:
         return await self._post(ENDPOINT_RESULTS, {"tankId": tank_id})
 
     async def _post(
-        self, endpoint: str, extra_payload: Mapping[str, Any] | None = None
+        self,
+        endpoint: str,
+        extra_payload: Mapping[str, Any] | None = None,
+        *,
+        authenticated: bool = True,
     ) -> dict[str, Any]:
         """POST to the Reef Kinetics API and return the JSON body."""
         url = f"{self._base_url}{endpoint}"
-        payload = self._base_payload()
+        payload = self._base_payload() if authenticated else self._portal_payload()
         if extra_payload:
             payload.update(extra_payload)
 
@@ -118,9 +169,17 @@ class ReefBotApiClient:
 
     def _base_payload(self) -> dict[str, Any]:
         """Build the common Reef Kinetics dashboard payload."""
+        if not self._token or self._user_id is None:
+            raise ReefBotAuthError("Missing Reef Kinetics token or user ID")
         return {
             "TOKEN": self._token,
             "USERID": self._user_id,
+            **self._portal_payload(),
+        }
+
+    def _portal_payload(self) -> dict[str, Any]:
+        """Build the common portal payload."""
+        return {
             "DEVICETOKEN": self._device_token,
             "PORTALAPPID": self._portal_app_id,
             "PORTALAPPSECRET": self._portal_app_secret,
@@ -133,6 +192,7 @@ class ReefBotApiClient:
         result = data.get("Result", data.get("result"))
         success = data.get("Success", data.get("success"))
         message = str(data.get("Message", data.get("message", "")))
+        token_message = str(data.get("TokenMessage", data.get("tokenMessage", "")))
 
         failed = success is False
         if result is not None:
@@ -140,10 +200,12 @@ class ReefBotApiClient:
             failed = failed or result_text in {"fail", "failed", "failure", "error"}
 
         if not failed:
+            if token_message and self._looks_like_auth_error(token_message):
+                raise ReefBotAuthError("Reef Kinetics token was rejected")
             return
 
         _LOGGER.debug("Reef Kinetics API returned an error result")
-        if self._looks_like_auth_error(message):
+        if self._looks_like_auth_error(message or token_message):
             raise ReefBotAuthError("Reef Kinetics credentials were rejected")
         raise ReefBotResponseError(message or "Reef Kinetics API returned an error")
 
@@ -154,6 +216,8 @@ class ReefBotApiClient:
         return any(
             token in lowered
             for token in ("auth", "token", "credential", "unauthorized", "login")
+        ) and not any(
+            token in lowered for token in ("valid token", "token valid", "token is valid")
         )
 
     @staticmethod
