@@ -506,8 +506,11 @@ class ReefBotMaintenanceComponentSensor(ReefBotEntity, SensorEntity):
                 "maxValue",
                 "TotalValue",
                 "totalValue",
+                "OriginalValue",
+                "originalValue",
             ),
         )
+        unit = self.native_unit_of_measurement
         return {
             "component_name": _component_name(component),
             "component_id": _first_present(
@@ -517,7 +520,8 @@ class ReefBotMaintenanceComponentSensor(ReefBotEntity, SensorEntity):
             "current_value": current,
             "capacity": capacity,
             "fill_percentage": _fill_percentage(current, capacity),
-            "unit": self.native_unit_of_measurement,
+            "display_value": _component_display_value(current, capacity, unit),
+            "unit": unit,
             "size_type": _first_present(
                 component, ("SizeTypeName", "sizeTypeName", "SizeType", "sizeType")
             ),
@@ -1182,6 +1186,30 @@ def _fill_percentage(current: Any, capacity: Any) -> int | None:
     if capacity_number <= 0:
         return None
     return round(current_number / capacity_number * 100)
+
+
+def _component_display_value(current: Any, capacity: Any, unit: str | None) -> str | None:
+    """Return a compact current/capacity display string."""
+    if current in (None, ""):
+        return None
+    current_text = _format_number(current)
+    capacity_text = _format_number(capacity)
+    unit_text = unit or ""
+    if capacity_text is None:
+        return f"{current_text} {unit_text}".strip()
+    return f"{current_text}/{capacity_text} {unit_text}".strip()
+
+
+def _format_number(value: Any) -> str | None:
+    """Return a number without unnecessary trailing zeroes."""
+    number = _coerce_number(value)
+    if number is None:
+        return None
+    if not isinstance(number, int | float):
+        return str(number)
+    if float(number).is_integer():
+        return str(int(number))
+    return str(number).rstrip("0").rstrip(".")
 
 
 def _parse_datetime(value: Any) -> datetime | None:
