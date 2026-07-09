@@ -8,6 +8,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import slugify
 
@@ -172,6 +173,7 @@ class ReefBotStartTestButton(ReefBotEntity, ButtonEntity):
 class ReefBotRefillChemicalButton(ReefBotEntity, ButtonEntity):
     """Button that resets one ReefBot chemical to its configured full volume."""
 
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:bottle-tonic-plus-outline"
 
     def __init__(self, coordinator: ReefBotCoordinator, tube_number: int) -> None:
@@ -186,8 +188,8 @@ class ReefBotRefillChemicalButton(ReefBotEntity, ButtonEntity):
         tube = self._tube()
         chemical = _chemical_display_name(tube)
         if chemical:
-            return f"Refill Tube {self._tube_number}: {chemical}"
-        return f"Refill Tube {self._tube_number}"
+            return f"Tube {self._tube_number}: Refill {chemical}"
+        return f"Tube {self._tube_number}: Refill"
 
     @property
     def available(self) -> bool:
@@ -259,6 +261,7 @@ class ReefBotRefillChemicalButton(ReefBotEntity, ButtonEntity):
 class ReefBotResetComponentButton(ReefBotEntity, ButtonEntity):
     """Button that resets a ReefBot maintenance component."""
 
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:restore"
 
     def __init__(
@@ -280,7 +283,7 @@ class ReefBotResetComponentButton(ReefBotEntity, ButtonEntity):
         component = self._component()
         component_name = _component_name(component) or self._device_component_id
         reset_title = _component_reset_title(component)
-        return f"{reset_title} {component_name}"
+        return f"{component_name}: {reset_title}"
 
     @property
     def available(self) -> bool:

@@ -26,8 +26,8 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Start-test button entities for configured tests.
 - Read-only maintenance sensors for syringe, waste, and RODI levels with current value, capacity, percentage, and display-value attributes.
 - Read-only sensors for notifications, configured safe margins, alarm logs, and pending calibrations.
-- Refill button entities for configured chemical tubes. These set one tube back to its configured full volume.
-- Maintenance button entities for Syringe, Waste, and RODI. These mirror the dashboard actions to replace, empty, or refill the component state.
+- Configuration-category refill button entities for configured chemical tubes. These set one tube back to its configured full volume.
+- Configuration-category maintenance button entities for Syringe, Waste, and RODI. These mirror the dashboard actions to replace, empty, or refill the component state.
 - Maintenance number entities for dashboard-enabled component capacities, such as Waste and RODI.
 - Diagnostics with sensitive fields redacted.
 
