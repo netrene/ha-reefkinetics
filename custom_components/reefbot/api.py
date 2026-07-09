@@ -51,6 +51,7 @@ ENDPOINT_OPERATION_REQUEST_HISTORY = (
 ENDPOINT_OPERATION_TYPES = "/api/APIService/GetOperationTypes"
 ENDPOINT_ONE_TIME_OPERATION_REQUEST = "/api/APIService/OneTimeOperationRequest"
 ENDPOINT_COMPONENT_SETTINGS = "/api/APIService/GetDeviceComponentSettings"
+ENDPOINT_UPDATE_COMPONENT_SETTING = "/api/APIService/UpdateDeviceComponentSettings"
 ENDPOINT_PENDING_CALIBRATION_REQUESTS = (
     "/api/APIService/CheckPendingCalibrationRequestsV2"
 )
@@ -286,6 +287,38 @@ class ReefBotApiClient:
         payload = await self._post(ENDPOINT_COMPONENT_SETTINGS, {"DeviceId": device_id})
         return self._extract_list(payload, ("Components", "components", "Settings"))
 
+    async def reset_device_component(
+        self, device_id: int | str, device_component_id: int | str
+    ) -> dict[str, Any]:
+        """Reset one ReefBot maintenance component using dashboard semantics."""
+        components = await self.get_device_component_settings(device_id)
+        component = _find_component(components, device_component_id)
+        if component is None:
+            raise ReefBotResponseError("ReefBot component was not found")
+
+        original_value = _first_present(
+            component, ("OriginalValue", "originalValue")
+        )
+        current_value = _component_reset_value(component)
+        if original_value is None or current_value is None:
+            raise ReefBotResponseError("ReefBot component has no reset value")
+
+        payload = {
+            "DeviceId": device_id,
+            "ComponentId": _first_present(component, ("ComponentId", "componentId")),
+            "OriginalValue": original_value,
+            "CurrentValue": current_value,
+            "DeviceComponentId": _first_present(
+                component, ("DeviceComponentId", "deviceComponentId")
+            ),
+            "ResetTime": _first_present(component, ("ResetTime", "resetTime")),
+        }
+        if payload["ComponentId"] is None or payload["DeviceComponentId"] is None:
+            raise ReefBotResponseError("ReefBot component is missing identifiers")
+
+        await self._post(ENDPOINT_UPDATE_COMPONENT_SETTING, payload)
+        return payload
+
     async def get_pending_calibration_requests(
         self, device_id: int | str
     ) -> list[dict[str, Any]]:
@@ -512,6 +545,46 @@ def _size_type_update_payload(size_type: Mapping[str, Any]) -> dict[str, Any]:
         "sizeTypeName": _first_present(size_type, ("sizeTypeName", "SizeTypeName")),
         "sizeTypeValue": _first_present(size_type, ("sizeTypeValue", "SizeTypeValue")),
     }
+
+
+def _find_component(
+    components: list[dict[str, Any]], device_component_id: int | str
+) -> dict[str, Any] | None:
+    """Return a component by its device component ID."""
+    target = str(device_component_id)
+    for component in components:
+        candidate = _first_present(
+            component, ("DeviceComponentId", "deviceComponentId")
+        )
+        if candidate is not None and str(candidate) == target:
+            return component
+    return None
+
+
+def _component_reset_value(component: Mapping[str, Any]) -> Any:
+    """Return the component value after pressing the dashboard reset button."""
+    change_operation = _first_present(
+        component, ("ChangeOperation", "changeOperation")
+    )
+    try:
+        operation = int(change_operation)
+    except (TypeError, ValueError):
+        operation = None
+
+    original_value = _first_present(component, ("OriginalValue", "originalValue"))
+    if operation == 0:
+        return original_value
+    if operation == 1:
+        return 0
+
+    reset_title = str(
+        _first_present(component, ("ResetTitle", "resetTitle")) or ""
+    ).strip().lower()
+    if reset_title in {"refill"}:
+        return original_value
+    if reset_title in {"empty", "replace", "reset"}:
+        return 0
+    return None
 
 
 def _first_present(data: Mapping[str, Any] | None, keys: tuple[str, ...]) -> Any:

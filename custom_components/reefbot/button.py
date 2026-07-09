@@ -26,6 +26,7 @@ async def async_setup_entry(
     coordinator: ReefBotCoordinator = hass.data[DOMAIN][entry.entry_id]
     known_start_buttons: set[str] = set()
     known_refill_buttons: set[int] = set()
+    known_component_buttons: set[str] = set()
 
     @callback
     def add_start_buttons() -> None:
@@ -54,16 +55,36 @@ async def async_setup_entry(
         if entities:
             async_add_entities(entities)
 
+    @callback
+    def add_component_buttons() -> None:
+        entities: list[ButtonEntity] = []
+        for component in coordinator.data.component_settings:
+            component_id = _device_component_id(component)
+            if component_id is None or not _is_resettable_component(component):
+                continue
+            component_key = str(component_id)
+            if component_key in known_component_buttons:
+                continue
+            known_component_buttons.add(component_key)
+            entities.append(ReefBotResetComponentButton(coordinator, component_id))
+        if entities:
+            async_add_entities(entities)
+
     add_start_buttons()
     add_refill_buttons()
+    add_component_buttons()
     remove_start_listener: CALLBACK_TYPE = coordinator.async_add_listener(
         add_start_buttons
     )
     remove_refill_listener: CALLBACK_TYPE = coordinator.async_add_listener(
         add_refill_buttons
     )
+    remove_component_listener: CALLBACK_TYPE = coordinator.async_add_listener(
+        add_component_buttons
+    )
     entry.async_on_unload(remove_start_listener)
     entry.async_on_unload(remove_refill_listener)
+    entry.async_on_unload(remove_component_listener)
 
 
 class ReefBotStartTestButton(ReefBotEntity, ButtonEntity):
@@ -235,6 +256,96 @@ class ReefBotRefillChemicalButton(ReefBotEntity, ButtonEntity):
         return None
 
 
+class ReefBotResetComponentButton(ReefBotEntity, ButtonEntity):
+    """Button that resets a ReefBot maintenance component."""
+
+    _attr_icon = "mdi:restore"
+
+    def __init__(
+        self, coordinator: ReefBotCoordinator, device_component_id: Any
+    ) -> None:
+        """Initialize the button."""
+        super().__init__(coordinator, f"reset_component_{device_component_id}")
+        self._device_component_id = str(device_component_id)
+        component = self._component()
+        component_name = _component_name(component) or self._device_component_id
+        reset_title = _component_reset_title(component)
+        self._attr_suggested_object_id = (
+            f"reefbot_{slugify(reset_title)}_{slugify(str(component_name))}"
+        )
+
+    @property
+    def name(self) -> str:
+        """Return the component reset button name."""
+        component = self._component()
+        component_name = _component_name(component) or self._device_component_id
+        reset_title = _component_reset_title(component)
+        return f"{reset_title} {component_name}"
+
+    @property
+    def available(self) -> bool:
+        """Return whether the component can be reset."""
+        return (
+            super().available
+            and self._component() is not None
+            and _device_id(self.coordinator) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return details about the component this button resets."""
+        component = self._component()
+        if not component:
+            return {"device_component_id": self._device_component_id}
+
+        return {
+            "device_component_id": self._device_component_id,
+            "component_id": _first_present(
+                component, ("ComponentId", "componentId")
+            ),
+            "component_name": _component_name(component),
+            "current_value": _first_present(
+                component, ("CurrentValue", "currentValue")
+            ),
+            "reset_value": _component_reset_value(component),
+            "original_value": _first_present(
+                component, ("OriginalValue", "originalValue")
+            ),
+            "unit": _first_present(component, ("Unit", "unit")),
+            "reset_title": _component_reset_title(component),
+        }
+
+    async def async_press(self) -> None:
+        """Reset one ReefBot maintenance component."""
+        await self.coordinator.async_request_refresh()
+
+        component = self._component()
+        device_id = _device_id(self.coordinator)
+        if component is None:
+            raise HomeAssistantError("ReefBot component is no longer configured")
+        if device_id is None:
+            raise HomeAssistantError("ReefBot device ID is missing")
+        if _component_reset_value(component) is None:
+            raise HomeAssistantError("ReefBot component has no reset value")
+
+        try:
+            await self.coordinator.client.reset_device_component(
+                device_id, self._device_component_id
+            )
+        except ReefBotApiError as err:
+            raise HomeAssistantError("Unable to reset ReefBot component") from err
+
+        await self.coordinator.async_request_refresh()
+
+    def _component(self) -> dict[str, Any] | None:
+        """Return the current component data for this button."""
+        for component in self.coordinator.data.component_settings:
+            component_id = _device_component_id(component)
+            if component_id is not None and str(component_id) == self._device_component_id:
+                return component
+        return None
+
+
 def _is_test_operation(operation: dict[str, Any]) -> bool:
     """Return whether an operation looks like a water test."""
     return _first_present(
@@ -283,6 +394,53 @@ def _chemical_capacity(tube: dict[str, Any]) -> Any:
             "currentValue",
         ),
     )
+
+
+def _is_resettable_component(component: dict[str, Any]) -> bool:
+    """Return whether a maintenance component should get a reset button."""
+    name = (_component_name(component) or "").strip().lower()
+    return name in {"syringe", "waste", "rodi"}
+
+
+def _device_component_id(component: dict[str, Any]) -> Any:
+    """Return the device component ID."""
+    return _first_present(component, ("DeviceComponentId", "deviceComponentId"))
+
+
+def _component_name(component: dict[str, Any] | None) -> str | None:
+    """Return the maintenance component display name."""
+    value = _first_present(component, ("ComponentName", "componentName"))
+    return str(value) if value is not None else None
+
+
+def _component_reset_title(component: dict[str, Any] | None) -> str:
+    """Return the dashboard reset action label."""
+    value = _first_present(component, ("ResetTitle", "resetTitle"))
+    return str(value) if value is not None else "Reset"
+
+
+def _component_reset_value(component: dict[str, Any]) -> Any:
+    """Return the value after resetting a maintenance component."""
+    change_operation = _first_present(
+        component, ("ChangeOperation", "changeOperation")
+    )
+    try:
+        operation = int(change_operation)
+    except (TypeError, ValueError):
+        operation = None
+
+    original_value = _first_present(component, ("OriginalValue", "originalValue"))
+    if operation == 0:
+        return original_value
+    if operation == 1:
+        return 0
+
+    reset_title = _component_reset_title(component).strip().lower()
+    if reset_title == "refill":
+        return original_value
+    if reset_title in {"empty", "replace", "reset"}:
+        return 0
+    return None
 
 
 def _device_id(coordinator: ReefBotCoordinator) -> Any:

@@ -27,13 +27,14 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Read-only maintenance sensors for syringe, waste, and RODI levels.
 - Read-only sensors for notifications, configured safe margins, alarm logs, and pending calibrations.
 - Refill button entities for configured chemical tubes. These set one tube back to its configured full volume.
+- Maintenance button entities for Syringe, Waste, and RODI. These mirror the dashboard actions to replace, empty, or refill the component state.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included
 
-This integration can start configured one-time tests and refill configured chemical tube values through Home Assistant button entities. Test buttons can consume reagents. Refill buttons update the Reef Kinetics cloud state for the selected chemical tube.
+This integration can start configured one-time tests, refill configured chemical tube values, and reset basic maintenance component values through Home Assistant button entities. Test buttons can consume reagents. Refill and maintenance buttons update the Reef Kinetics cloud state for the selected item.
 
-This integration does not abort tests, calibrate the device, configure reagent positions, empty waste, refill RODI, or perform other maintenance write operations.
+This integration does not abort tests, calibrate the device, configure reagent positions, or perform maintenance write operations beyond the exposed chemical/component reset buttons.
 
 Maintenance writes are intentionally out of scope until the matching dashboard behavior has been reviewed carefully.
 
@@ -71,6 +72,7 @@ The default polling interval is 5 minutes. ReefBot tests are usually much less f
 - `POST /api/APIService/OneTimeOperationRequest`
 - `POST /api/APIService/UpdateDeviceAvailableChemicalsSettingsV2`
 - `POST /api/APIService/GetDeviceComponentSettings`
+- `POST /api/APIService/UpdateDeviceComponentSettings`
 - `POST /api/APIService/CheckPendingCalibrationRequestsV2`
 - `POST /api/APIService/GetSizeTypes`
 - `POST /api/APIService/GetComponents`
