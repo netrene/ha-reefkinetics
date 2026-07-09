@@ -28,15 +28,16 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Read-only sensors for notifications, configured safe margins, alarm logs, and pending calibrations.
 - Refill button entities for configured chemical tubes. These set one tube back to its configured full volume.
 - Maintenance button entities for Syringe, Waste, and RODI. These mirror the dashboard actions to replace, empty, or refill the component state.
+- Maintenance number entities for dashboard-enabled component capacities, such as Waste and RODI.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included
 
-This integration can start configured one-time tests, refill configured chemical tube values, and reset basic maintenance component values through Home Assistant button entities. Test buttons can consume reagents. Refill and maintenance buttons update the Reef Kinetics cloud state for the selected item.
+This integration can start configured one-time tests, refill configured chemical tube values, reset basic maintenance component values through Home Assistant button entities, and update dashboard-enabled component capacities through Home Assistant number entities. Test buttons can consume reagents. Refill and maintenance buttons update the Reef Kinetics cloud state for the selected item.
 
-This integration does not abort tests, calibrate the device, configure reagent positions, or perform maintenance write operations beyond the exposed chemical/component reset buttons.
+This integration does not abort tests, calibrate the device, configure reagent positions, or perform maintenance write operations beyond the exposed chemical/component reset buttons and capacity numbers.
 
-Maintenance writes are intentionally out of scope until the matching dashboard behavior has been reviewed carefully.
+The dashboard's component `Unlimited` checkbox is not exposed yet.
 
 ## Installation With HACS
 

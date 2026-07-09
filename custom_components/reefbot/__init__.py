@@ -14,6 +14,7 @@ from .coordinator import ReefBotCoordinator
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
+    Platform.NUMBER,
     Platform.SENSOR,
 ]
 

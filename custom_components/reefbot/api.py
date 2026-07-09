@@ -319,6 +319,38 @@ class ReefBotApiClient:
         await self._post(ENDPOINT_UPDATE_COMPONENT_SETTING, payload)
         return payload
 
+    async def update_device_component_capacity(
+        self,
+        device_id: int | str,
+        device_component_id: int | str,
+        original_value: float,
+    ) -> dict[str, Any]:
+        """Update one ReefBot maintenance component capacity."""
+        components = await self.get_device_component_settings(device_id)
+        component = _find_component(components, device_component_id)
+        if component is None:
+            raise ReefBotResponseError("ReefBot component was not found")
+
+        current_value = _first_present(component, ("CurrentValue", "currentValue"))
+        if current_value is None:
+            raise ReefBotResponseError("ReefBot component has no current value")
+
+        payload = {
+            "DeviceId": device_id,
+            "ComponentId": _first_present(component, ("ComponentId", "componentId")),
+            "OriginalValue": _api_number(original_value),
+            "CurrentValue": current_value,
+            "DeviceComponentId": _first_present(
+                component, ("DeviceComponentId", "deviceComponentId")
+            ),
+            "ResetTime": _first_present(component, ("ResetTime", "resetTime")),
+        }
+        if payload["ComponentId"] is None or payload["DeviceComponentId"] is None:
+            raise ReefBotResponseError("ReefBot component is missing identifiers")
+
+        await self._post(ENDPOINT_UPDATE_COMPONENT_SETTING, payload)
+        return payload
+
     async def get_pending_calibration_requests(
         self, device_id: int | str
     ) -> list[dict[str, Any]]:
@@ -585,6 +617,14 @@ def _component_reset_value(component: Mapping[str, Any]) -> Any:
     if reset_title in {"empty", "replace", "reset"}:
         return 0
     return None
+
+
+def _api_number(value: float) -> int | float:
+    """Return a compact number for the dashboard API."""
+    numeric_value = float(value)
+    if numeric_value.is_integer():
+        return int(numeric_value)
+    return numeric_value
 
 
 def _first_present(data: Mapping[str, Any] | None, keys: tuple[str, ...]) -> Any:
