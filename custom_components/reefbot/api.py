@@ -36,6 +36,9 @@ ENDPOINT_PARAMETER_RESULTS = (
     "/api/APIService/GetOperationResultsByTankIdOperationParameterIdWithColors"
 )
 ENDPOINT_CHEMICAL_SETTINGS = "/api/APIService/GetDeviceChemicalSettings"
+ENDPOINT_UPDATE_CHEMICAL_SETTINGS = (
+    "/api/APIService/UpdateDeviceAvailableChemicalsSettingsV2"
+)
 ENDPOINT_AVAILABLE_OPERATIONS = "/api/APIService/GetAvailableOperations"
 ENDPOINT_SOURCE_SETTINGS = "/api/APIService/GetDeviceSourceSettings"
 ENDPOINT_DEVICE_RESULTS = "/api/APIService/GetOperationResultsByDeviceIdV2"
@@ -176,6 +179,45 @@ class ReefBotApiClient:
         """Return configured ReefBot vial chemical settings."""
         payload = await self._post(ENDPOINT_CHEMICAL_SETTINGS, {"DeviceId": device_id})
         return self._extract_list(payload, ("Chemicals", "chemicals"))
+
+    async def refill_device_chemical(
+        self, device_id: int | str, position_index: int
+    ) -> dict[str, Any]:
+        """Set one configured chemical to its configured full volume."""
+        chemicals = await self.get_device_chemical_settings(device_id)
+        if not chemicals:
+            raise ReefBotResponseError("ReefBot returned no chemical settings")
+
+        updated_chemicals = [_chemical_update_payload(chemical) for chemical in chemicals]
+        updated_chemical: dict[str, Any] | None = None
+        for chemical in updated_chemicals:
+            try:
+                chemical_position = int(chemical["positionIndex"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if chemical_position != position_index:
+                continue
+
+            full_value = _first_present(
+                chemical, ("customVolume", "sizeTypeValue", "currentValue")
+            )
+            if full_value is None:
+                raise ReefBotResponseError("ReefBot chemical has no configured volume")
+            chemical["currentValue"] = full_value
+            updated_chemical = chemical
+            break
+
+        if updated_chemical is None:
+            raise ReefBotResponseError("ReefBot chemical position was not found")
+
+        await self._post(
+            ENDPOINT_UPDATE_CHEMICAL_SETTINGS,
+            {
+                "DeviceId": device_id,
+                "availableChemicals": updated_chemicals,
+            },
+        )
+        return updated_chemical
 
     async def get_available_operations(
         self, device_id: int | str
@@ -429,3 +471,55 @@ class ReefBotApiClient:
             items = []
 
         return [item for item in items if isinstance(item, dict)]
+
+
+def _chemical_update_payload(chemical: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a chemical setting in the shape expected by the dashboard API."""
+    available_size_types = _first_present(
+        chemical, ("availableSizeTypes", "AvailableSizeTypes")
+    )
+    if isinstance(available_size_types, list):
+        available_size_types = [
+            _size_type_update_payload(size_type)
+            for size_type in available_size_types
+            if isinstance(size_type, Mapping)
+        ]
+    else:
+        available_size_types = []
+
+    return {
+        "chemicalId": _first_present(chemical, ("chemicalId", "ChemicalId")),
+        "positionIndex": _first_present(chemical, ("positionIndex", "PositionIndex")),
+        "chemicalName": _first_present(chemical, ("chemicalName", "ChemicalName")),
+        "typeId": _first_present(chemical, ("typeId", "TypeId")),
+        "chemicalDisplayName": _first_present(
+            chemical, ("chemicalDisplayName", "ChemicalDisplayName")
+        ),
+        "unit": _first_present(chemical, ("unit", "Unit")),
+        "sizeTypeId": _first_present(chemical, ("sizeTypeId", "SizeTypeId")),
+        "sizeTypeName": _first_present(chemical, ("sizeTypeName", "SizeTypeName")),
+        "sizeTypeValue": _first_present(chemical, ("sizeTypeValue", "SizeTypeValue")),
+        "currentValue": _first_present(chemical, ("currentValue", "CurrentValue")),
+        "customVolume": _first_present(chemical, ("customVolume", "CustomVolume")),
+        "availableSizeTypes": available_size_types,
+    }
+
+
+def _size_type_update_payload(size_type: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a size type in the shape expected by the dashboard API."""
+    return {
+        "sizeTypeId": _first_present(size_type, ("sizeTypeId", "SizeTypeId")),
+        "sizeTypeName": _first_present(size_type, ("sizeTypeName", "SizeTypeName")),
+        "sizeTypeValue": _first_present(size_type, ("sizeTypeValue", "SizeTypeValue")),
+    }
+
+
+def _first_present(data: Mapping[str, Any] | None, keys: tuple[str, ...]) -> Any:
+    """Return the first present value from a mapping."""
+    if not data:
+        return None
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return None

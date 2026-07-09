@@ -25,6 +25,7 @@ async def async_setup_entry(
     """Set up ReefBot button entities."""
     coordinator: ReefBotCoordinator = hass.data[DOMAIN][entry.entry_id]
     known_start_buttons: set[str] = set()
+    known_refill_buttons: set[int] = set()
 
     @callback
     def add_start_buttons() -> None:
@@ -41,9 +42,28 @@ async def async_setup_entry(
         if entities:
             async_add_entities(entities)
 
+    @callback
+    def add_refill_buttons() -> None:
+        entities: list[ButtonEntity] = []
+        for tube in coordinator.data.tubes:
+            tube_number = _tube_number(tube)
+            if tube_number is None or tube_number in known_refill_buttons:
+                continue
+            known_refill_buttons.add(tube_number)
+            entities.append(ReefBotRefillChemicalButton(coordinator, tube_number))
+        if entities:
+            async_add_entities(entities)
+
     add_start_buttons()
-    remove_listener: CALLBACK_TYPE = coordinator.async_add_listener(add_start_buttons)
-    entry.async_on_unload(remove_listener)
+    add_refill_buttons()
+    remove_start_listener: CALLBACK_TYPE = coordinator.async_add_listener(
+        add_start_buttons
+    )
+    remove_refill_listener: CALLBACK_TYPE = coordinator.async_add_listener(
+        add_refill_buttons
+    )
+    entry.async_on_unload(remove_start_listener)
+    entry.async_on_unload(remove_refill_listener)
 
 
 class ReefBotStartTestButton(ReefBotEntity, ButtonEntity):
@@ -128,6 +148,93 @@ class ReefBotStartTestButton(ReefBotEntity, ButtonEntity):
         return None
 
 
+class ReefBotRefillChemicalButton(ReefBotEntity, ButtonEntity):
+    """Button that resets one ReefBot chemical to its configured full volume."""
+
+    _attr_icon = "mdi:bottle-tonic-plus-outline"
+
+    def __init__(self, coordinator: ReefBotCoordinator, tube_number: int) -> None:
+        """Initialize the button."""
+        super().__init__(coordinator, f"refill_tube_{tube_number}")
+        self._tube_number = tube_number
+        self._attr_suggested_object_id = f"reefbot_refill_tube_{tube_number}"
+
+    @property
+    def name(self) -> str:
+        """Return a refill button name that includes the configured chemical."""
+        tube = self._tube()
+        chemical = _chemical_display_name(tube)
+        if chemical:
+            return f"Refill Tube {self._tube_number}: {chemical}"
+        return f"Refill Tube {self._tube_number}"
+
+    @property
+    def available(self) -> bool:
+        """Return whether the chemical can be refilled."""
+        return (
+            super().available
+            and self._tube() is not None
+            and _device_id(self.coordinator) is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return details about the chemical this button refills."""
+        tube = self._tube()
+        if not tube:
+            return {"tube_number": self._tube_number}
+
+        current_value = _first_present(tube, ("CurrentValue", "currentValue"))
+        capacity = _chemical_capacity(tube)
+        return {
+            "tube_number": self._tube_number,
+            "position_index": self._position_index,
+            "chemical_id": _first_present(tube, ("ChemicalId", "chemicalId")),
+            "chemical_display_name": _chemical_display_name(tube),
+            "current_value": current_value,
+            "full_value": capacity,
+            "unit": _first_present(tube, ("Unit", "unit")),
+        }
+
+    async def async_press(self) -> None:
+        """Reset one chemical to the configured full volume."""
+        await self.coordinator.async_request_refresh()
+
+        tube = self._tube()
+        device_id = _device_id(self.coordinator)
+        if tube is None:
+            raise HomeAssistantError("ReefBot chemical is no longer configured")
+        if device_id is None:
+            raise HomeAssistantError("ReefBot device ID is missing")
+        if _chemical_capacity(tube) is None:
+            raise HomeAssistantError("ReefBot chemical has no configured volume")
+
+        try:
+            await self.coordinator.client.refill_device_chemical(
+                device_id, self._position_index
+            )
+        except ReefBotApiError as err:
+            raise HomeAssistantError("Unable to refill ReefBot chemical") from err
+
+        await self.coordinator.async_request_refresh()
+
+    @property
+    def _position_index(self) -> int:
+        """Return the zero-based chemical position index."""
+        return self._tube_number - 1
+
+    def _tube(self) -> dict[str, Any] | None:
+        """Return the current tube data for this button."""
+        for tube in self.coordinator.data.tubes:
+            position = _first_present(tube, ("PositionIndex", "positionIndex"))
+            try:
+                if int(position) == self._position_index:
+                    return tube
+            except (TypeError, ValueError):
+                continue
+        return None
+
+
 def _is_test_operation(operation: dict[str, Any]) -> bool:
     """Return whether an operation looks like a water test."""
     return _first_present(
@@ -146,6 +253,36 @@ def _operation_display_name(operation: dict[str, Any]) -> str | None:
     """Return the operation display name."""
     value = _first_present(operation, ("DisplayName", "displayName"))
     return str(value) if value is not None else None
+
+
+def _tube_number(tube: dict[str, Any]) -> int | None:
+    """Return the one-based tube number from a chemical setting."""
+    position = _first_present(tube, ("PositionIndex", "positionIndex"))
+    try:
+        return int(position) + 1
+    except (TypeError, ValueError):
+        return None
+
+
+def _chemical_display_name(tube: dict[str, Any] | None) -> str | None:
+    """Return a display name for a chemical setting."""
+    value = _first_present(tube, ("ChemicalDisplayName", "chemicalDisplayName"))
+    return str(value) if value is not None else None
+
+
+def _chemical_capacity(tube: dict[str, Any]) -> Any:
+    """Return the configured full chemical volume."""
+    return _first_present(
+        tube,
+        (
+            "CustomVolume",
+            "customVolume",
+            "SizeTypeValue",
+            "sizeTypeValue",
+            "CurrentValue",
+            "currentValue",
+        ),
+    )
 
 
 def _device_id(coordinator: ReefBotCoordinator) -> Any:

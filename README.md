@@ -26,13 +26,14 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Start-test button entities for configured tests.
 - Read-only maintenance sensors for syringe, waste, and RODI levels.
 - Read-only sensors for notifications, configured safe margins, alarm logs, and pending calibrations.
+- Refill button entities for configured chemical tubes. These set one tube back to its configured full volume.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included
 
-This integration can start configured one-time tests through Home Assistant button entities. Those buttons call the Reef Kinetics cloud API and can consume reagents.
+This integration can start configured one-time tests and refill configured chemical tube values through Home Assistant button entities. Test buttons can consume reagents. Refill buttons update the Reef Kinetics cloud state for the selected chemical tube.
 
-This integration does not abort tests, calibrate the device, configure reagents, refill chemicals, empty waste, refill RODI, or perform maintenance write operations.
+This integration does not abort tests, calibrate the device, configure reagent positions, empty waste, refill RODI, or perform other maintenance write operations.
 
 Maintenance writes are intentionally out of scope until the matching dashboard behavior has been reviewed carefully.
 
@@ -68,6 +69,7 @@ The default polling interval is 5 minutes. ReefBot tests are usually much less f
 - `POST /api/APIService/GetPendingOperationRequestsByTank`
 - `POST /api/APIService/GetOperationRequestsHistoryByTankId`
 - `POST /api/APIService/OneTimeOperationRequest`
+- `POST /api/APIService/UpdateDeviceAvailableChemicalsSettingsV2`
 - `POST /api/APIService/GetDeviceComponentSettings`
 - `POST /api/APIService/CheckPendingCalibrationRequestsV2`
 - `POST /api/APIService/GetSizeTypes`
