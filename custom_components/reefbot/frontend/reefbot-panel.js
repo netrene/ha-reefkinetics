@@ -178,9 +178,9 @@ function buildModel(hass, lastPressed) {
     waste: componentModel(states, "waste", ["waste"]),
     syringe: componentModel(states, "syringe", ["syringe"]),
     online: findOnline(states),
-    currentOperation: findByName(states, ["current operation"]),
-    pending: findByName(states, ["pending operations"]),
-    recentOperation: recentOperationFromHistory(findByName(states, ["pending operations"])),
+    currentOperation: findCurrentOperationSensor(states),
+    pending: findPendingOperationsSensor(states),
+    recentOperation: recentOperationFromHistory(findPendingOperationsSensor(states)),
     lastPressed,
     notifications: findByName(states, ["notifications"]),
     alarms: findByName(states, ["alarm logs", "safe margins"]),
@@ -388,6 +388,24 @@ function findByName(states, terms) {
   return states.find((state) => {
     const name = entityName(state).toLowerCase();
     return terms.some((term) => name.includes(term));
+  });
+}
+
+function findCurrentOperationSensor(states) {
+  return states.find((state) => {
+    if (!state.entity_id.startsWith("sensor.")) return false;
+    if (typeof state.attributes?.pending === "boolean") return true;
+    const name = entityName(state).toLowerCase();
+    return name.includes("current operation") || name.includes("aktueller vorgang");
+  });
+}
+
+function findPendingOperationsSensor(states) {
+  return states.find((state) => {
+    if (!state.entity_id.startsWith("sensor.")) return false;
+    if (Array.isArray(state.attributes?.pending) || Array.isArray(state.attributes?.recent_history)) return true;
+    const name = entityName(state).toLowerCase();
+    return name.includes("pending operations") || name.includes("ausstehende");
   });
 }
 
