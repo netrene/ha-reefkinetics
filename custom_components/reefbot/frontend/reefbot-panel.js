@@ -1087,12 +1087,12 @@ const styles = `
   }
   .syringe-carriage {
     position: absolute;
-    left: calc(4.5% + (91% / 16) - 32px);
-    top: 88px;
+    left: calc(4.5% + (91% / 16) - 40px);
+    top: 58px;
     width: 64px;
     height: 190px;
     z-index: 2;
-    opacity: 0.9;
+    opacity: 0.92;
     transform: translateX(0);
   }
   .active-test .syringe-carriage {
@@ -1101,10 +1101,10 @@ const styles = `
   .syringe-carriage::before {
     content: "";
     position: absolute;
-    left: 13px;
+    left: 17px;
     top: 0;
-    width: 38px;
-    height: 28px;
+    width: 30px;
+    height: 26px;
     border-radius: 7px;
     background:
       linear-gradient(135deg, rgba(255,255,255,0.08), transparent 45%),
@@ -1116,53 +1116,65 @@ const styles = `
     content: "";
     position: absolute;
     left: 29px;
-    top: 26px;
+    top: 24px;
     width: 6px;
-    height: 20px;
+    height: 17px;
     border-radius: 4px;
     background: rgba(210, 225, 230, 0.72);
   }
   .syringe-body {
     position: absolute;
-    left: 20px;
-    top: 42px;
-    width: 24px;
-    height: 92px;
-    border-radius: 13px;
+    left: 23px;
+    top: 38px;
+    width: 18px;
+    height: 112px;
+    border-radius: 9px;
     border: 2px solid rgba(200, 218, 222, 0.38);
     background:
-      linear-gradient(90deg, rgba(255,255,255,0.28), transparent 32%, rgba(255,255,255,0.08)),
-      linear-gradient(180deg, rgba(225, 237, 240, 0.72), rgba(111, 132, 139, 0.55));
+      repeating-linear-gradient(180deg, transparent 0 7px, rgba(30, 37, 41, 0.58) 7px 8px, transparent 8px 12px),
+      linear-gradient(90deg, rgba(255,255,255,0.42), transparent 34%, rgba(255,255,255,0.13)),
+      linear-gradient(180deg, rgba(235, 244, 246, 0.68), rgba(134, 152, 157, 0.42));
     box-shadow: inset 0 0 10px rgba(0,0,0,0.28), 0 8px 18px rgba(0,0,0,0.3);
   }
   .syringe-body span {
     position: absolute;
-    left: 7px;
-    right: 7px;
-    top: 8px;
-    bottom: 12px;
+    left: 5px;
+    right: 5px;
+    top: 11px;
+    bottom: 14px;
     border-radius: 999px;
     background:
       linear-gradient(180deg, rgba(255,255,255,0.75), rgba(255,255,255,0.15)),
       rgba(108, 215, 241, 0.34);
   }
+  .syringe-body span::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 8px;
+    width: 5px;
+    height: 86px;
+    background:
+      repeating-linear-gradient(180deg, rgba(8, 12, 14, 0.86) 0 1px, transparent 1px 6px);
+    opacity: 0.75;
+  }
   .syringe-body::after {
     content: "";
     position: absolute;
-    left: -12px;
-    right: -12px;
-    bottom: 14px;
-    height: 8px;
+    left: -16px;
+    right: -16px;
+    bottom: 22px;
+    height: 7px;
     border-radius: 999px;
-    background: rgba(28, 35, 39, 0.74);
-    box-shadow: 0 0 0 1px rgba(210, 225, 230, 0.14);
+    background: rgba(210, 220, 222, 0.52);
+    box-shadow: 0 0 0 1px rgba(210, 225, 230, 0.18), 0 3px 8px rgba(0,0,0,0.28);
   }
   .syringe-needle {
     position: absolute;
     left: 31px;
-    top: 134px;
+    top: 150px;
     width: 2px;
-    height: 50px;
+    height: 30px;
     background: rgba(200, 218, 222, 0.72);
     box-shadow: 0 0 8px rgba(108, 215, 241, 0.28);
   }
@@ -1594,7 +1606,7 @@ const styles = `
       height: 560px;
     }
     .syringe-carriage {
-      top: 88px;
+      top: 58px;
     }
     .test-grid {
       grid-template-columns: 1fr;
@@ -1608,7 +1620,7 @@ const styles = `
       border-width: 8px;
     }
     .syringe-carriage {
-      top: 84px;
+      top: 56px;
     }
   }
 
