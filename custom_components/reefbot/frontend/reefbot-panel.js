@@ -829,66 +829,94 @@ const styles = `
   }
   .syringe-carriage {
     position: absolute;
-    left: 10%;
-    top: 158px;
-    width: 178px;
-    height: 76px;
+    left: 9%;
+    top: 128px;
+    width: 64px;
+    height: 190px;
     z-index: 2;
-    opacity: 0.82;
+    opacity: 0.9;
     transform: translateX(0);
   }
   .active-test .syringe-carriage {
-    animation: syringeTravel 6.5s ease-in-out infinite;
+    animation: syringeTravel 8s ease-in-out infinite;
+  }
+  .syringe-carriage::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 0;
+    width: 38px;
+    height: 28px;
+    border-radius: 7px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.08), transparent 45%),
+      #151b1f;
+    border: 1px solid rgba(210, 225, 230, 0.22);
+    box-shadow: 0 8px 18px rgba(0,0,0,0.34);
+  }
+  .syringe-carriage::after {
+    content: "";
+    position: absolute;
+    left: 29px;
+    top: 26px;
+    width: 6px;
+    height: 20px;
+    border-radius: 4px;
+    background: rgba(210, 225, 230, 0.72);
   }
   .syringe-body {
     position: absolute;
-    left: 0;
-    top: 18px;
-    width: 142px;
-    height: 26px;
-    border-radius: 14px;
+    left: 20px;
+    top: 42px;
+    width: 24px;
+    height: 92px;
+    border-radius: 13px;
     border: 2px solid rgba(200, 218, 222, 0.38);
     background:
-      linear-gradient(90deg, rgba(255,255,255,0.12), transparent 35%),
-      rgba(16, 21, 24, 0.82);
-    box-shadow: inset 0 0 10px rgba(0,0,0,0.35), 0 8px 18px rgba(0,0,0,0.28);
+      linear-gradient(90deg, rgba(255,255,255,0.28), transparent 32%, rgba(255,255,255,0.08)),
+      linear-gradient(180deg, rgba(225, 237, 240, 0.72), rgba(111, 132, 139, 0.55));
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.28), 0 8px 18px rgba(0,0,0,0.3);
   }
   .syringe-body span {
     position: absolute;
-    left: 14px;
-    right: 30px;
-    top: 9px;
-    height: 4px;
+    left: 7px;
+    right: 7px;
+    top: 8px;
+    bottom: 12px;
     border-radius: 999px;
-    background: rgba(108, 215, 241, 0.55);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.75), rgba(255,255,255,0.15)),
+      rgba(108, 215, 241, 0.34);
   }
   .syringe-body::after {
     content: "";
     position: absolute;
-    right: -20px;
-    top: 8px;
-    width: 24px;
+    left: -12px;
+    right: -12px;
+    bottom: 14px;
     height: 8px;
-    border-radius: 5px;
-    background: rgba(200, 218, 222, 0.5);
+    border-radius: 999px;
+    background: rgba(28, 35, 39, 0.74);
+    box-shadow: 0 0 0 1px rgba(210, 225, 230, 0.14);
   }
   .syringe-needle {
     position: absolute;
-    left: 158px;
-    top: 30px;
-    width: 44px;
-    height: 2px;
+    left: 31px;
+    top: 134px;
+    width: 2px;
+    height: 50px;
     background: rgba(200, 218, 222, 0.72);
     box-shadow: 0 0 8px rgba(108, 215, 241, 0.28);
   }
   .syringe-needle::after {
     content: "";
     position: absolute;
-    right: -5px;
-    top: -2px;
-    border-left: 6px solid rgba(200, 218, 222, 0.72);
-    border-top: 3px solid transparent;
-    border-bottom: 3px solid transparent;
+    left: -4px;
+    bottom: -8px;
+    border-top: 9px solid rgba(105, 215, 244, 0.8);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    filter: drop-shadow(0 0 6px rgba(105, 215, 244, 0.5));
   }
   .gantry {
     position: absolute;
@@ -1216,8 +1244,9 @@ const styles = `
   }
   @keyframes syringeTravel {
     0%, 100% { transform: translateX(0); }
-    35% { transform: translateX(18%); }
-    65% { transform: translateX(52%); }
+    18% { transform: translateX(0); }
+    42% { transform: translateX(260%); }
+    70% { transform: translateX(620%); }
   }
   @keyframes chamberLiquid {
     0%, 100% { height: 48%; filter: hue-rotate(0deg); }
@@ -1247,6 +1276,24 @@ const styles = `
     .test-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+    .machine {
+      min-height: 640px;
+    }
+    .machine-frame {
+      height: 640px;
+    }
+    .vial-row {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px 10px;
+      bottom: 24px;
+    }
+    .syringe-carriage {
+      left: 12%;
+      top: 120px;
+    }
+    .active-test .syringe-carriage {
+      animation: syringeTravelTablet 8s ease-in-out infinite;
+    }
   }
 
   @media (max-width: 720px) {
@@ -1266,14 +1313,44 @@ const styles = `
       grid-template-columns: 1fr;
     }
     .machine-frame {
-      height: 760px;
+      height: 900px;
     }
     .vial-row {
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
     }
+    .syringe-carriage {
+      transform: scale(0.88);
+      transform-origin: top left;
+    }
     .test-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  @media (max-width: 480px) {
+    .machine {
+      min-height: 1240px;
+    }
+    .machine-frame {
+      height: 1240px;
+      border-width: 8px;
+    }
+    .vial-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      left: 10%;
+      right: 10%;
+      gap: 14px;
+    }
+    .syringe-carriage {
+      top: 108px;
+    }
+  }
+
+  @keyframes syringeTravelTablet {
+    0%, 100% { transform: translateX(0); }
+    18% { transform: translateX(0); }
+    42% { transform: translateX(360%); }
+    70% { transform: translateX(690%); }
   }
 `;
