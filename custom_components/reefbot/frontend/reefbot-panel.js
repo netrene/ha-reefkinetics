@@ -78,6 +78,12 @@ class ReefBotPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-press]").forEach((button) => {
       button.addEventListener("click", () => this.pressButton(button));
     });
+    this.shadowRoot.querySelectorAll("[data-more-info]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        if (event.target?.closest?.("button")) return;
+        this.showMoreInfo(element.dataset.moreInfo);
+      });
+    });
     this.shadowRoot.querySelectorAll("[data-menu]").forEach((button) => {
       button.addEventListener("click", () => this.toggleMenu());
     });
@@ -88,14 +94,28 @@ class ReefBotPanel extends HTMLElement {
     const entityId = button?.dataset?.press;
     if (!entityId || !this._hass) return;
     const name = button.dataset.label || entityName(this._hass.states[entityId]) || entityId;
-    this._lastPressed = {
-      entityId,
-      name,
-      time: Date.now(),
-    };
+    this._lastPressed = button.dataset.kind === "test"
+      ? {
+        entityId,
+        name,
+        time: Date.now(),
+        kind: "test",
+      }
+      : undefined;
     this.render();
     this._hass.callService("button", "press", { entity_id: entityId });
     this.refreshReefBotEntities();
+  }
+
+  showMoreInfo(entityId) {
+    if (!entityId) return;
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        bubbles: true,
+        composed: true,
+        detail: { entityId },
+      })
+    );
   }
 
   refreshReefBotEntities() {
@@ -322,15 +342,15 @@ function renderTests(model) {
     const button = test.button;
     const disabled = button && button.state === "unavailable" ? "disabled" : "";
     return `
-      <article class="test-card">
-        <button class="play" ${button ? `data-press="${button.entity_id}" data-label="${escapeHtml(test.operationName || test.name)}"` : "disabled"} ${disabled} title="Start test">
+      <article class="test-card" ${test.entityId ? `data-more-info="${test.entityId}"` : ""} title="Open history">
+        <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : "disabled"} ${disabled} title="Start test">
           <ha-icon icon="mdi:play"></ha-icon>
         </button>
         <div class="test-main">
           <strong>${escapeHtml(test.name)}</strong>
           <span>${escapeHtml(formatReading(test.value, test.unit))}</span>
         </div>
-        ${sparkline(test.history)}
+        ${sparkline(test.history, test.unit)}
       </article>
     `;
   }).join("");
@@ -433,7 +453,8 @@ function renderChamber(model) {
   const chamber = chamberOperation(model);
   const operation = chamber.name || "Idle";
   const active = isChamberActive(model);
-  const stateLabel = active ? "Active" : model.recentOperation ? "Last" : "Idle";
+  const stateLabel = active ? "Live" : "Idle";
+  const operationPrefix = active ? "Live: " : model.recentOperation ? "Last: " : "";
   const progress = active ? chamberProgress(chamber, model) : undefined;
   return `
     <section class="chamber">
@@ -451,7 +472,7 @@ function renderChamber(model) {
           <span class="stir-bar"></span>
         </div>
       </div>
-      <strong>${escapeHtml(operation)}</strong>
+      <strong>${escapeHtml(`${operationPrefix}${operation}`)}</strong>
       ${progress ? renderChamberProgress(progress) : `<p>${escapeHtml(pendingValue)} pending operation${pendingValue === "1" ? "" : "s"}</p>`}
     </section>
   `;
@@ -469,7 +490,7 @@ function chamberOperation(model) {
     ? current.state
     : currentAttrs.name || currentAttrs.operation_name || currentAttrs.display_name;
   const currentActive = Boolean(currentAttrs.pending) || activeState(current?.state);
-  if (currentActive && activeState(currentName)) {
+  if (currentActive && activeState(currentName) && isTestOperation(currentName, model)) {
     return {
       active: true,
       name: currentName,
@@ -483,7 +504,7 @@ function chamberOperation(model) {
     return pending;
   }
 
-  const recentPress = model.lastPressed && Date.now() - model.lastPressed.time < recentPressWindow(model.lastPressed.name)
+  const recentPress = model.lastPressed?.kind === "test" && Date.now() - model.lastPressed.time < recentPressWindow(model.lastPressed.name)
     ? model.lastPressed
     : undefined;
   if (recentPress) {
@@ -504,7 +525,10 @@ function chamberOperation(model) {
 function firstPendingOperation(pendingSensor) {
   const pending = pendingSensor?.attributes?.pending;
   if (!Array.isArray(pending)) return undefined;
-  const item = pending.find((row) => activeState(row?.name || row?.operation || row?.display_name));
+  const item = pending.find((row) => {
+    const name = row?.name || row?.operation || row?.display_name;
+    return activeState(name) && isTestOperation(name);
+  });
   if (!item) return undefined;
   return {
     active: true,
@@ -549,10 +573,10 @@ function progressFromSensors(model) {
   const durationMinutes = numberValue(model.currentTestDuration?.state);
   const progress = numberValue(model.currentTestProgress?.state);
   const remainingMinutes = numberValue(model.currentTestRemaining?.state);
-  if (durationMinutes === undefined || progress === undefined || remainingMinutes === undefined) {
+  if (model.currentTestProgress?.attributes?.active !== true) {
     return undefined;
   }
-  if (model.currentTestProgress?.attributes?.active === false) {
+  if (durationMinutes === undefined || progress === undefined || remainingMinutes === undefined) {
     return undefined;
   }
   return {
@@ -686,7 +710,10 @@ function findConfiguredTestForParameter(configuredTests, parameterName) {
 function recentOperationFromHistory(pendingSensor) {
   const history = pendingSensor?.attributes?.recent_history;
   if (!Array.isArray(history)) return undefined;
-  const item = history.find((row) => activeState(row?.name || row?.operation || row?.display_name));
+  const item = history.find((row) => {
+    const name = row?.name || row?.operation || row?.display_name;
+    return activeState(name) && isTestOperation(name);
+  });
   if (!item) return undefined;
   return {
     name: item.name || item.operation || item.display_name,
@@ -715,7 +742,7 @@ function extractHistory(state) {
     .reverse();
 }
 
-function sparkline(values = []) {
+function sparkline(values = [], unit = "") {
   if (!values.length) {
     return `<svg class="spark" viewBox="0 0 80 28"><path d="M2 21 L78 21"></path></svg>`;
   }
@@ -727,7 +754,16 @@ function sparkline(values = []) {
     const y = 24 - ((value - min) / range) * 20;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
-  return `<svg class="spark" viewBox="0 0 80 28"><polyline points="${points}"></polyline></svg>`;
+  const recent = values.slice(-3);
+  const labels = recent
+    .map((value) => `<span>${escapeHtml(formatNumber(value))}</span>`)
+    .join("");
+  return `
+    <div class="spark-wrap">
+      <svg class="spark" viewBox="0 0 80 28"><polyline points="${points}"></polyline></svg>
+      <div class="spark-values">${labels}</div>
+    </div>
+  `;
 }
 
 function emptyTube(number) {
@@ -769,6 +805,21 @@ function durationForTest(name) {
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
   return matches[0]?.minutes;
+}
+
+function isTestOperation(name, model) {
+  if (durationForTest(name) !== undefined) return true;
+  if (!model?.configuredTests?.length) return false;
+  const keys = searchAliases(name).map(normalize).filter(Boolean);
+  return model.configuredTests.some((test) => {
+    const haystack = [
+      test.name,
+      test.parameter,
+      test.latest?.operation,
+      test.latest?.brand,
+    ].flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
+    return keys.some((key) => haystack.some((value) => value.includes(key) || key.includes(value)));
+  });
 }
 
 function matchScore(keys, candidate) {
@@ -1015,6 +1066,7 @@ const styles = `
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.045);
     border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
   }
   .play {
     width: 34px;
@@ -1037,9 +1089,28 @@ const styles = `
     margin-top: 3px;
   }
   .spark {
-    grid-column: 1 / -1;
     width: 100%;
     height: 28px;
+  }
+  .spark-wrap {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+  .spark-values {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    margin-top: 2px;
+    color: #b8c7cc;
+    font-size: 10px;
+    line-height: 1;
+  }
+  .spark-values span {
+    min-width: 0;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .spark path, .spark polyline {
     fill: none;
@@ -1087,8 +1158,8 @@ const styles = `
   }
   .syringe-carriage {
     position: absolute;
-    left: calc(4.5% + (91% / 16) - 40px);
-    top: 58px;
+    left: calc(4.5% + (91% / 16) - 34px);
+    top: 42px;
     width: 64px;
     height: 190px;
     z-index: 2;
@@ -1606,7 +1677,7 @@ const styles = `
       height: 560px;
     }
     .syringe-carriage {
-      top: 58px;
+      top: 42px;
     }
     .test-grid {
       grid-template-columns: 1fr;
@@ -1620,7 +1691,7 @@ const styles = `
       border-width: 8px;
     }
     .syringe-carriage {
-      top: 56px;
+      top: 40px;
     }
   }
 
