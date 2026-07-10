@@ -246,10 +246,15 @@ function renderTests(model) {
 
 function renderMachine(model) {
   const tubes = Array.from({ length: 8 }, (_, index) => model.tubes[index] || emptyTube(index + 1));
+  const active = isChamberActive(model);
   return `
     <section class="machine">
-        <div class="machine-frame">
+      <div class="machine-frame ${active ? "active-test" : ""}">
         <div class="top-rail"></div>
+        <div class="syringe-carriage">
+          <div class="syringe-body"><span></span></div>
+          <div class="syringe-needle"></div>
+        </div>
         <div class="gantry"></div>
         <div class="led-strip"></div>
         <div class="vial-row">
@@ -261,7 +266,7 @@ function renderMachine(model) {
 }
 
 function renderVial(tube) {
-  const height = clamp(tube.percentage, 4, 100);
+  const height = clamp(tube.percentage * 0.86, 4, 86);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
   return `
     <article class="vial-card">
@@ -271,6 +276,7 @@ function renderVial(tube) {
       <div class="vial-cap"></div>
       <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
         <span>${escapeHtml(label)}</span>
+        <em>20 mL</em>
         <i></i>
       </div>
       <strong>Tube ${tube.number}</strong>
@@ -329,7 +335,7 @@ function renderChamber(model) {
     ? model.lastPressed
     : undefined;
   const operation = stateOperation || (recentPress ? `Request sent: ${recentPress.name}` : model.recentOperation?.name || "Idle");
-  const active = Boolean(stateOperation || recentPress || pendingValue !== "0");
+  const active = isChamberActive(model);
   const stateLabel = active ? "Active" : model.recentOperation ? "Last" : "Idle";
   return `
     <section class="chamber">
@@ -338,13 +344,28 @@ function renderChamber(model) {
         <span class="${active ? "warn" : "good"}">${stateLabel}</span>
       </div>
       <div class="chamber-art ${active ? "active" : ""}">
-        <div class="cuvette"><i></i></div>
-        <div class="progress-ring"><span></span></div>
+        <div class="measure-beam beam-left"></div>
+        <div class="measure-beam beam-right"></div>
+        <div class="cuvette">
+          <i></i>
+          <span class="swirl one"></span>
+          <span class="swirl two"></span>
+          <span class="stir-bar"></span>
+        </div>
       </div>
       <strong>${escapeHtml(operation)}</strong>
       <p>${escapeHtml(pendingValue)} pending operation${pendingValue === "1" ? "" : "s"}</p>
     </section>
   `;
+}
+
+function isChamberActive(model) {
+  const current = model.currentOperation;
+  const pending = model.pending;
+  const stateOperation = activeState(current?.state);
+  const pendingActive = activeState(pending?.state);
+  const recentPress = model.lastPressed && Date.now() - model.lastPressed.time < 20 * 60 * 1000;
+  return Boolean(stateOperation || pendingActive || recentPress);
 }
 
 function renderStatus(model) {
@@ -643,9 +664,9 @@ const styles = `
     display: none;
   }
   .brand-mark {
-    width: 74px;
-    height: 74px;
-    border-radius: 18px;
+    width: 78px;
+    height: 78px;
+    border-radius: 20px;
     background: #1289a6;
     position: relative;
     overflow: hidden;
@@ -653,16 +674,16 @@ const styles = `
   }
   .brand-mark span, .brand-mark i {
     position: absolute;
-    top: 31px;
+    top: 30px;
     height: 18px;
     border-radius: 12px;
     background: #fff;
-    transform: rotate(-15deg);
+    transform: rotate(-12deg);
   }
-  .brand-mark span:nth-child(1) { left: 13px; width: 13px; }
-  .brand-mark span:nth-child(2) { left: 30px; width: 19px; }
-  .brand-mark span:nth-child(3) { left: 53px; width: 27px; }
-  .brand-mark i { right: 9px; top: 25px; width: 12px; height: 12px; border-radius: 50%; }
+  .brand-mark span:nth-child(1) { left: 14px; width: 14px; }
+  .brand-mark span:nth-child(2) { left: 34px; width: 22px; }
+  .brand-mark span:nth-child(3) { left: 62px; width: 34px; }
+  .brand-mark i { right: 13px; top: 24px; width: 15px; height: 15px; border-radius: 50%; }
   h1, h2, p { margin: 0; }
   h1 { font-size: 32px; letter-spacing: 0; }
   .header p { color: #91a2a9; margin-top: 4px; }
@@ -806,6 +827,69 @@ const styles = `
     background: #30363a;
     box-shadow: inset 0 -12px 18px rgba(0,0,0,0.22);
   }
+  .syringe-carriage {
+    position: absolute;
+    left: 10%;
+    top: 158px;
+    width: 178px;
+    height: 76px;
+    z-index: 2;
+    opacity: 0.82;
+    transform: translateX(0);
+  }
+  .active-test .syringe-carriage {
+    animation: syringeTravel 6.5s ease-in-out infinite;
+  }
+  .syringe-body {
+    position: absolute;
+    left: 0;
+    top: 18px;
+    width: 142px;
+    height: 26px;
+    border-radius: 14px;
+    border: 2px solid rgba(200, 218, 222, 0.38);
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.12), transparent 35%),
+      rgba(16, 21, 24, 0.82);
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.35), 0 8px 18px rgba(0,0,0,0.28);
+  }
+  .syringe-body span {
+    position: absolute;
+    left: 14px;
+    right: 30px;
+    top: 9px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(108, 215, 241, 0.55);
+  }
+  .syringe-body::after {
+    content: "";
+    position: absolute;
+    right: -20px;
+    top: 8px;
+    width: 24px;
+    height: 8px;
+    border-radius: 5px;
+    background: rgba(200, 218, 222, 0.5);
+  }
+  .syringe-needle {
+    position: absolute;
+    left: 158px;
+    top: 30px;
+    width: 44px;
+    height: 2px;
+    background: rgba(200, 218, 222, 0.72);
+    box-shadow: 0 0 8px rgba(108, 215, 241, 0.28);
+  }
+  .syringe-needle::after {
+    content: "";
+    position: absolute;
+    right: -5px;
+    top: -2px;
+    border-left: 6px solid rgba(200, 218, 222, 0.72);
+    border-top: 3px solid transparent;
+    border-bottom: 3px solid transparent;
+  }
   .gantry {
     position: absolute;
     left: 9%;
@@ -849,9 +933,9 @@ const styles = `
   }
   .vial-cap {
     width: min(50px, 72%);
-    height: 18px;
+    height: 24px;
     margin: 0 auto -2px;
-    border-radius: 7px 7px 4px 4px;
+    border-radius: 8px 8px 4px 4px;
     background:
       linear-gradient(90deg, rgba(255,255,255,0.08), transparent 30%),
       linear-gradient(180deg, #22282c, #090d0f);
@@ -899,6 +983,22 @@ const styles = `
     border-radius: 50%;
     background: rgba(255,255,255,0.25);
     animation: wave 4s ease-in-out infinite;
+  }
+  .vial em {
+    position: absolute;
+    left: -8px;
+    right: -8px;
+    top: 10.5%;
+    z-index: 2;
+    height: 1px;
+    font-style: normal;
+    font-size: 9px;
+    line-height: 1;
+    color: rgba(230, 238, 238, 0.68);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+    border-top: 1px solid rgba(230, 238, 238, 0.42);
+    text-align: right;
+    padding-right: 2px;
   }
   .vial span {
     position: absolute;
@@ -1005,6 +1105,7 @@ const styles = `
     border-radius: 8px 8px 16px 16px;
     border: 2px solid rgba(255,255,255,0.32);
     overflow: hidden;
+    box-shadow: inset 0 0 18px rgba(255,255,255,0.06);
   }
   .cuvette i {
     position: absolute;
@@ -1013,21 +1114,65 @@ const styles = `
     bottom: 0;
     height: 48%;
     background: linear-gradient(180deg, #81d6e9, #1289a6);
-    animation: wave 4s ease-in-out infinite;
   }
-  .progress-ring {
+  .chamber-art.active .cuvette i {
+    animation: chamberLiquid 1.5s ease-in-out infinite;
+  }
+  .swirl {
     position: absolute;
-    width: 154px;
-    height: 154px;
+    left: 8px;
+    right: 8px;
+    height: 16px;
     border-radius: 50%;
-    border: 5px solid rgba(255,255,255,0.08);
-    border-top-color: #60d6f7;
-    border-right-color: #60d6f7;
-    animation: spin 3.8s linear infinite;
-    opacity: 0.35;
+    border-top: 2px solid rgba(255,255,255,0.34);
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    z-index: 2;
+    opacity: 0;
   }
-  .chamber-art.active .progress-ring {
+  .swirl.one { bottom: 42px; }
+  .swirl.two { bottom: 28px; transform: rotate(180deg); }
+  .chamber-art.active .swirl {
     opacity: 1;
+    animation: stirSwirl 1.15s linear infinite;
+  }
+  .chamber-art.active .swirl.two {
+    animation-delay: -0.45s;
+  }
+  .stir-bar {
+    position: absolute;
+    left: 16px;
+    bottom: 14px;
+    width: 22px;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(230, 238, 238, 0.76);
+    box-shadow: 0 0 10px rgba(96, 214, 247, 0.45);
+    transform-origin: 50% 50%;
+  }
+  .chamber-art.active .stir-bar {
+    animation: stirBar 0.8s linear infinite;
+  }
+  .measure-beam {
+    position: absolute;
+    top: 95px;
+    width: 78px;
+    height: 4px;
+    opacity: 0;
+    background: linear-gradient(90deg, transparent, rgba(120, 229, 255, 0.95), transparent);
+    filter: drop-shadow(0 0 8px rgba(120, 229, 255, 0.75));
+  }
+  .beam-left {
+    left: 24px;
+  }
+  .beam-right {
+    right: 24px;
+    transform: rotate(180deg);
+  }
+  .chamber-art.active .measure-beam {
+    animation: sensorFlash 3.2s ease-in-out infinite;
+  }
+  .chamber-art.active .beam-right {
+    animation-delay: 0.18s;
   }
   .chamber p {
     margin-top: 5px;
@@ -1069,8 +1214,26 @@ const styles = `
     0%, 100% { filter: brightness(1); }
     50% { filter: brightness(1.12); }
   }
-  @keyframes spin {
+  @keyframes syringeTravel {
+    0%, 100% { transform: translateX(0); }
+    35% { transform: translateX(18%); }
+    65% { transform: translateX(52%); }
+  }
+  @keyframes chamberLiquid {
+    0%, 100% { height: 48%; filter: hue-rotate(0deg); }
+    50% { height: 53%; filter: hue-rotate(18deg); }
+  }
+  @keyframes stirSwirl {
+    0% { transform: translateX(-5px) scaleX(0.88); }
+    50% { transform: translateX(5px) scaleX(1.08); }
+    100% { transform: translateX(-5px) scaleX(0.88); }
+  }
+  @keyframes stirBar {
     to { transform: rotate(360deg); }
+  }
+  @keyframes sensorFlash {
+    0%, 18%, 100% { opacity: 0; transform: translateX(0); }
+    24%, 32% { opacity: 1; transform: translateX(12px); }
   }
 
   @media (max-width: 1100px) {
