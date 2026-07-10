@@ -29,6 +29,7 @@ The Reef Kinetics cloud API used here is undocumented and may change without not
 - Configuration-category refill button entities for configured chemical tubes. These set one tube back to its configured full volume.
 - Configuration-category maintenance button entities for Syringe, Waste, and RODI. These mirror the dashboard actions to replace, empty, or refill the component state.
 - Maintenance number entities for dashboard-enabled component capacities, such as Waste and RODI.
+- Sidebar panel with a ReefBot-inspired visual control surface for tests, vial levels, RODI/Waste, syringe usage, and current operation state.
 - Diagnostics with sensitive fields redacted.
 
 ## Not Included
@@ -62,6 +63,18 @@ Do not share these credentials and do not commit HAR files or real API payloads 
 ## Polling
 
 The default polling interval is 5 minutes. ReefBot tests are usually much less frequent than this; the interval is intentionally conservative for early testing and can be made configurable later.
+
+## Sidebar Panel
+
+The integration registers a `ReefBot` sidebar panel in Home Assistant. The panel is an early visual control surface that uses the entities created by the integration:
+
+- Parameter sensors provide current readings and mini history charts.
+- Tube sensors provide vial names, volumes, capacities, and fill percentages.
+- Tube refill buttons are used for vial reset actions.
+- Maintenance sensors and buttons provide RODI, Waste, and Syringe display and actions.
+- Current and pending operation sensors provide chamber state.
+
+The panel does not call the Reef Kinetics cloud directly. It only reads Home Assistant entity states and presses the existing Home Assistant button entities.
 
 ## Known API Endpoints
 
