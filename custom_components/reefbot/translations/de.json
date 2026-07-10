@@ -64,6 +64,18 @@
       "current_operation": {
         "name": "Aktueller Vorgang"
       },
+      "current_test_duration": {
+        "name": "Aktuelle Testdauer"
+      },
+      "current_test_elapsed_time": {
+        "name": "Aktuelle Testlaufzeit"
+      },
+      "current_test_progress": {
+        "name": "Aktueller Testfortschritt"
+      },
+      "current_test_remaining_time": {
+        "name": "Aktuelle Testrestzeit"
+      },
       "firmware_version": {
         "name": "Firmware-Version"
       },

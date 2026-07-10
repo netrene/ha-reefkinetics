@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -11,9 +11,11 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import slugify
 
@@ -53,6 +55,10 @@ async def async_setup_entry(
         ),
         ReefBotCurrentOperationSensor(coordinator),
         ReefBotPendingOperationsSensor(coordinator),
+        ReefBotCurrentTestDurationSensor(coordinator),
+        ReefBotCurrentTestElapsedSensor(coordinator),
+        ReefBotCurrentTestRemainingSensor(coordinator),
+        ReefBotCurrentTestProgressSensor(coordinator),
         ReefBotTankSensor(
             coordinator, "tank_name", "tank_name", _tank_value("Name", "name")
         ),
@@ -304,6 +310,119 @@ class ReefBotPendingOperationsSensor(ReefBotEntity, SensorEntity):
                 if isinstance(request, dict)
             ],
         }
+
+
+class ReefBotCurrentTestTimingSensor(ReefBotEntity, SensorEntity):
+    """Base sensor for calculated current test timing."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator, suffix: str) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, suffix)
+
+    async def async_added_to_hass(self) -> None:
+        """Update calculated time values between cloud refreshes."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass, self._async_tick, timedelta(minutes=1)
+            )
+        )
+
+    @callback
+    def _async_tick(self, now: datetime) -> None:
+        """Write a new state without refreshing the cloud coordinator."""
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return timing metadata."""
+        timing = _current_test_timing(self.coordinator)
+        if not timing:
+            return {"active": False}
+        return {
+            "active": True,
+            "test_name": timing["name"],
+            "started_at": timing["started_at"],
+            "expected_completion_time": timing["expected_at"],
+            "duration_minutes": timing["duration_minutes"],
+        }
+
+
+class ReefBotCurrentTestDurationSensor(ReefBotCurrentTestTimingSensor):
+    """Configured duration of the current test."""
+
+    _attr_translation_key = "current_test_duration"
+    _attr_icon = "mdi:timer-outline"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "current_test_duration")
+
+    @property
+    def native_value(self) -> int | None:
+        """Return configured duration in minutes."""
+        timing = _current_test_timing(self.coordinator)
+        return timing["duration_minutes"] if timing else None
+
+
+class ReefBotCurrentTestElapsedSensor(ReefBotCurrentTestTimingSensor):
+    """Elapsed time of the current test."""
+
+    _attr_translation_key = "current_test_elapsed_time"
+    _attr_icon = "mdi:timer-sand"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "current_test_elapsed_time")
+
+    @property
+    def native_value(self) -> int | None:
+        """Return elapsed test time in minutes."""
+        timing = _current_test_timing(self.coordinator)
+        return timing["elapsed_minutes"] if timing else None
+
+
+class ReefBotCurrentTestRemainingSensor(ReefBotCurrentTestTimingSensor):
+    """Remaining time of the current test."""
+
+    _attr_translation_key = "current_test_remaining_time"
+    _attr_icon = "mdi:timer-sand-paused"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "current_test_remaining_time")
+
+    @property
+    def native_value(self) -> int | None:
+        """Return remaining test time in minutes."""
+        timing = _current_test_timing(self.coordinator)
+        return timing["remaining_minutes"] if timing else None
+
+
+class ReefBotCurrentTestProgressSensor(ReefBotCurrentTestTimingSensor):
+    """Progress of the current test."""
+
+    _attr_translation_key = "current_test_progress"
+    _attr_icon = "mdi:progress-clock"
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, "current_test_progress")
+
+    @property
+    def native_value(self) -> int | None:
+        """Return current test progress as a percentage."""
+        timing = _current_test_timing(self.coordinator)
+        return timing["progress"] if timing else None
 
 
 class ReefBotNotificationsSensor(ReefBotEntity, SensorEntity):
@@ -879,6 +998,204 @@ def _operation_request_summary(
     }
 
 
+TEST_DURATIONS_MINUTES: tuple[tuple[tuple[str, ...], int], ...] = (
+    (("RedSea Alkalinity", "RedSea Alkalinity Pro", "Red Sea Alkalinity Pro"), 26),
+    (("RedSea Phosphate Pro Low Range", "RedSea PO4 Pro Low Range", "RedSea PO4 Pro Low Range 13 drops"), 57),
+    (("RedSea Phosphate Pro High Range", "RedSea PO4 Pro High Range"), 57),
+    (("RedSea Calcium",), 37),
+    (("RedSea Magnesium",), 59),
+    (("Fauna Marin AquaHome Nitrate", "Fauna Marin NO3", "FaunaMarin NO3"), 50),
+    (("Fauna Marin AquaHome Nitrite", "Fauna Marin AquaHome NO2", "FaunaMarin NO2"), 50),
+    (("Fauna Marin Aquahome Phospate", "Fauna Marin AquaHome Phosphate"), 45),
+    (("Fauna Marin KH",), 37),
+    (("Colombo phosphate", "Colombo PO4", "Colombo PO4 Saltwater"), 55),
+    (("Colombo KH Aquatest",), 37),
+    (("Colombo Magnesium",), 59),
+    (("Colombo Ammonia",), 59),
+    (("Colombo pH fresh",), 20),
+    (("Colombo GH",), 15),
+    (("Colombo Iron",), 60),
+    (("Colombo Silicate",), 45),
+    (("Colombo Nitrite",), 59),
+    (("API Alkalinity",), 24),
+    (("API Calcium",), 36),
+    (("API Nitrate",), 49),
+    (("API Nitrite",), 32),
+    (("API Phosphate",), 45),
+    (("API Ammonia",), 38),
+    (("API GH",), 21),
+    (("API Copper",), 40),
+    (("API pH Fresh",), 22),
+    (("API High Range pH",), 24),
+    (("Tropic Marin Nitrate Pro",), 59),
+    (("Tropic Marin Nitrite Pro",), 59),
+    (("Tropic Marin Phosphate Pro",), 41),
+    (("Tropic Marin KH",), 45),
+    (("Tropic Marin KH Pro",), 37),
+    (("Tropic Marin GH",), 45),
+    (("Tropic Marin pH fresh",), 24),
+    (("Tropic Marin pH salt",), 24),
+    (("Salifert alkalinity",), 35),
+    (("Salifert Calcium",), 59),
+    (("Salifert Ammonia",), 48),
+    (("Salifert GH",), 24),
+    (("Salifert pH",), 24),
+    (("Giesemann Phosphate",), 49),
+    (("Giesemann Magnesium",), 59),
+    (("Giesemann Alkalinity",), 48),
+    (("Giesemann Ammonia",), 59),
+    (("Giesmann Nitrite",), 20),
+    (("Giesmann Iron",), 40),
+    (("Giesmann Ammonium",), 60),
+    (("Giesemann Aquaristic Iodine", "Giesemann Aquaristic lodine"), 45),
+    (("Elos KH Wateranalysis",), 24),
+    (("Elos Cu Wateranalysis",), 37),
+    (("Elos Phosphate",), 35),
+    (("Elos Ammonium",), 52),
+    (("Elos pH",), 20),
+    (("Elos GH",), 20),
+    (("Elos Iron",), 40),
+    (("Elos NO2 wateranalysis",), 24),
+    (("NTLABS Phosphate Fresh",), 24),
+    (("NTLABS Phosphate Marine",), 59),
+    (("NTLABS Nitrate",), 48),
+    (("NTLABS Calcium",), 48),
+    (("NTLABS Ammonia",), 50),
+    (("NTLABS Nitrite",), 25),
+    (("NTLABS Marine Alkalinity",), 24),
+    (("NTLABS Alkalinity",), 36),
+    (("NTLABS pH Marine",), 24),
+    (("NTLABS pH Freshwater",), 24),
+    (("NTLABS General Hardness",), 37),
+    (("Aquaforest Alkalinity",), 41),
+    (("JBL Alkalinity",), 37),
+    (("JBL General Hardness",), 20),
+    (("JBL Silicate",), 45),
+    (("JBL Carbon dioxide",), 37),
+    (("JBL Iron",), 37),
+    (("JBL pH",), 37),
+    (("H2Ocean Magnesium",), 59),
+    (("H2Ocean Alkalinity",), 27),
+    (("Monitor Calcium Saltwater",), 37),
+    (("Monitor Calcium Freshwater",), 37),
+    (("Monitor Alkalinity Reef",), 35),
+    (("Monitor Total Alkalinity",), 35),
+    (("Monitor Ammonia",), 37),
+)
+
+
+def _current_test_timing(coordinator: ReefBotCoordinator) -> dict[str, Any] | None:
+    """Return calculated timing information for the current test operation."""
+    request = coordinator.data.current_operation_request
+    if not request:
+        return None
+
+    name = _first_present(request, ("Name", "name"))
+    if not name:
+        return None
+    duration_minutes = _duration_for_test(str(name))
+    if duration_minutes is None:
+        return None
+
+    started_at = _parse_datetime(
+        _first_present(
+            request,
+            (
+                "AddedDateString",
+                "addedDateString",
+                "Added",
+                "added",
+                "Date",
+                "date",
+            ),
+        )
+    )
+    expected_at = _parse_datetime(
+        _first_present(
+            request,
+            (
+                "ExpectedCompletionTime",
+                "expectedCompletionTime",
+                "ExpectedCompletionDateString",
+                "expectedCompletionDateString",
+            ),
+        )
+    )
+    if started_at is None and expected_at is not None:
+        started_at = expected_at - timedelta(minutes=duration_minutes)
+    if started_at is None:
+        return None
+
+    now = datetime.now(UTC)
+    duration = timedelta(minutes=duration_minutes)
+    elapsed = max(timedelta(), now - started_at)
+    remaining = max(timedelta(), duration - elapsed)
+    progress = min(100, round(elapsed / duration * 100))
+    return {
+        "name": str(name),
+        "started_at": started_at.isoformat(),
+        "expected_at": expected_at.isoformat()
+        if expected_at
+        else (started_at + duration).isoformat(),
+        "duration_minutes": duration_minutes,
+        "elapsed_minutes": min(duration_minutes, int(elapsed.total_seconds() // 60)),
+        "remaining_minutes": int((remaining.total_seconds() + 59) // 60),
+        "progress": progress,
+    }
+
+
+def _duration_for_test(name: str) -> int | None:
+    """Return configured test duration in minutes."""
+    keys = [_normalize(value) for value in _search_aliases(name)]
+    best_score = 0
+    best_duration: int | None = None
+    for names, duration in TEST_DURATIONS_MINUTES:
+        score = max(_match_score(keys, candidate) for candidate in names)
+        if score > best_score:
+            best_score = score
+            best_duration = duration
+    return best_duration if best_score > 0 else None
+
+
+def _match_score(keys: list[str], candidate: str) -> int:
+    """Score a candidate duration name against operation aliases."""
+    values = [_normalize(value) for value in _search_aliases(candidate)]
+    score = 0
+    for key in keys:
+        for value in values:
+            if not key or not value:
+                continue
+            if key == value:
+                score = max(score, 1000 + len(value))
+            if value in key:
+                score = max(score, 500 + len(value))
+            if key in value:
+                score = max(score, 250 + len(key))
+    return score
+
+
+def _search_aliases(value: str) -> list[str]:
+    """Return common aliases used by the ReefBot dashboard."""
+    text = str(value or "").lower()
+    aliases = [text]
+    if "nitrate" in text or "no3" in text:
+        aliases.extend(("no3", "nitrate"))
+    if "nitrite" in text or "no2" in text:
+        aliases.extend(("no2", "nitrite"))
+    if "phosphate" in text or "po4" in text:
+        aliases.extend(("po4", "phosphate"))
+    if "alkalinity" in text or "alk" in text or "kh" in text:
+        aliases.extend(("alkalinity", "kh"))
+    if "calcium" in text or " ca " in f" {text} ":
+        aliases.extend(("calcium", "ca"))
+    return aliases
+
+
+def _normalize(value: str) -> str:
+    """Normalize names for duration matching."""
+    return slugify(str(value or "")).replace("_", "")
+
+
 def _notification_summary(item: dict[str, Any]) -> dict[str, Any]:
     """Return a compact notification row."""
     return {
@@ -1224,6 +1541,10 @@ def _parse_datetime(value: Any) -> datetime | None:
     text = value.strip().replace("Z", "+00:00")
     for parser in (
         datetime.fromisoformat,
+        lambda raw: datetime.strptime(raw, "%b %d, %Y %I:%M %p"),
+        lambda raw: datetime.strptime(raw, "%b %d, %I:%M %p").replace(
+            year=datetime.now(UTC).year
+        ),
         lambda raw: datetime.strptime(raw, "%Y-%m-%d %H:%M"),
         lambda raw: datetime.strptime(raw, "%Y-%m-%d %H:%M:%S"),
     ):

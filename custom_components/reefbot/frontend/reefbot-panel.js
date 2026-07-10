@@ -278,6 +278,10 @@ function buildModel(hass, lastPressed) {
     online: findOnline(states),
     currentOperation: findCurrentOperationSensor(states),
     pending: findPendingOperationsSensor(states),
+    currentTestDuration: findTimingSensor(states, "current_test_duration"),
+    currentTestElapsed: findTimingSensor(states, "current_test_elapsed_time"),
+    currentTestRemaining: findTimingSensor(states, "current_test_remaining_time"),
+    currentTestProgress: findTimingSensor(states, "current_test_progress"),
     recentOperation: recentOperationFromHistory(findPendingOperationsSensor(states)),
     lastPressed,
     notifications: findByName(states, ["notifications"]),
@@ -430,7 +434,7 @@ function renderChamber(model) {
   const operation = chamber.name || "Idle";
   const active = isChamberActive(model);
   const stateLabel = active ? "Active" : model.recentOperation ? "Last" : "Idle";
-  const progress = active ? chamberProgress(chamber) : undefined;
+  const progress = active ? chamberProgress(chamber, model) : undefined;
   return `
     <section class="chamber">
       <div class="section-title small">
@@ -515,7 +519,10 @@ function recentPressWindow(name) {
   return (duration + 5) * 60 * 1000;
 }
 
-function chamberProgress(operation) {
+function chamberProgress(operation, model) {
+  const sensorProgress = progressFromSensors(model);
+  if (sensorProgress) return sensorProgress;
+
   if (!operation?.name) return undefined;
   const durationMinutes = durationForTest(operation.name);
   if (!durationMinutes) return undefined;
@@ -535,6 +542,23 @@ function chamberProgress(operation) {
     durationMinutes,
     percent: clamp((elapsedMs / durationMs) * 100, 0, 100),
     remainingMs,
+  };
+}
+
+function progressFromSensors(model) {
+  const durationMinutes = numberValue(model.currentTestDuration?.state);
+  const progress = numberValue(model.currentTestProgress?.state);
+  const remainingMinutes = numberValue(model.currentTestRemaining?.state);
+  if (durationMinutes === undefined || progress === undefined || remainingMinutes === undefined) {
+    return undefined;
+  }
+  if (model.currentTestProgress?.attributes?.active === false) {
+    return undefined;
+  }
+  return {
+    durationMinutes,
+    percent: clamp(progress, 0, 100),
+    remainingMs: Math.max(0, remainingMinutes * 60 * 1000),
   };
 }
 
@@ -606,6 +630,18 @@ function findPendingOperationsSensor(states) {
     if (Array.isArray(state.attributes?.pending) || Array.isArray(state.attributes?.recent_history)) return true;
     const name = entityName(state).toLowerCase();
     return name.includes("pending operations") || name.includes("ausstehende");
+  });
+}
+
+function findTimingSensor(states, suffix) {
+  return states.find((state) => {
+    if (!state.entity_id.startsWith("sensor.")) return false;
+    if (!isReefBotEntity(state)) return false;
+    const normalizedEntity = normalize(state.entity_id);
+    const normalizedSuffix = normalize(suffix);
+    if (normalizedEntity.includes(normalizedSuffix)) return true;
+    const name = normalize(entityName(state));
+    return name.includes(normalizedSuffix) || normalizedSuffix.includes(name);
   });
 }
 
@@ -1051,8 +1087,8 @@ const styles = `
   }
   .syringe-carriage {
     position: absolute;
-    left: 9%;
-    top: 128px;
+    left: calc(4.5% + (91% / 16) - 32px);
+    top: 88px;
     width: 64px;
     height: 190px;
     z-index: 2;
@@ -1483,8 +1519,8 @@ const styles = `
   @keyframes syringeTravel {
     0%, 100% { transform: translateX(0); }
     18% { transform: translateX(0); }
-    42% { transform: translateX(260%); }
-    70% { transform: translateX(620%); }
+    42% { transform: translateX(345%); }
+    70% { transform: translateX(700%); }
   }
   @keyframes chamberLiquid {
     0%, 100% { height: 48%; filter: hue-rotate(0deg); }
@@ -1503,6 +1539,20 @@ const styles = `
     24%, 32% { opacity: 1; transform: translateX(12px); }
   }
 
+  @media (max-width: 1350px) {
+    .content-grid {
+      grid-template-columns: 240px minmax(0, 1fr);
+    }
+    .right-rail {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .test-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
   @media (max-width: 1100px) {
     .content-grid {
       grid-template-columns: 1fr;
@@ -1510,24 +1560,6 @@ const styles = `
     .left-rail, .right-rail {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-    .test-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .machine {
-      min-height: 640px;
-    }
-    .machine-frame {
-      height: 640px;
-    }
-    .vial-row {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px 10px;
-      bottom: 24px;
-    }
-    .syringe-carriage {
-      left: 12%;
-      top: 120px;
     }
     .active-test .syringe-carriage {
       animation: syringeTravelTablet 8s ease-in-out infinite;
@@ -1550,16 +1582,19 @@ const styles = `
     .left-rail, .right-rail {
       grid-template-columns: 1fr;
     }
-    .machine-frame {
-      height: 900px;
+    .machine {
+      min-height: 0;
+      overflow-x: auto;
+      padding-bottom: 10px;
+      scrollbar-color: rgba(102, 215, 247, 0.35) rgba(255,255,255,0.08);
     }
-    .vial-row {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
+    .machine-frame {
+      width: 920px;
+      max-width: none;
+      height: 560px;
     }
     .syringe-carriage {
-      transform: scale(0.88);
-      transform-origin: top left;
+      top: 88px;
     }
     .test-grid {
       grid-template-columns: 1fr;
@@ -1567,28 +1602,20 @@ const styles = `
   }
 
   @media (max-width: 480px) {
-    .machine {
-      min-height: 1240px;
-    }
     .machine-frame {
-      height: 1240px;
+      width: 860px;
+      height: 540px;
       border-width: 8px;
     }
-    .vial-row {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      left: 10%;
-      right: 10%;
-      gap: 14px;
-    }
     .syringe-carriage {
-      top: 108px;
+      top: 84px;
     }
   }
 
   @keyframes syringeTravelTablet {
     0%, 100% { transform: translateX(0); }
     18% { transform: translateX(0); }
-    42% { transform: translateX(360%); }
-    70% { transform: translateX(690%); }
+    42% { transform: translateX(345%); }
+    70% { transform: translateX(700%); }
   }
 `;
