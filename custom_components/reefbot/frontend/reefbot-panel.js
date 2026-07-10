@@ -4,6 +4,7 @@ class ReefBotPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass = undefined;
     this._lastRender = 0;
+    this._narrow = false;
   }
 
   set hass(hass) {
@@ -17,6 +18,15 @@ class ReefBotPanel extends HTMLElement {
 
   connectedCallback() {
     this.render();
+  }
+
+  set narrow(value) {
+    this._narrow = Boolean(value);
+    this.updateMenuButton();
+  }
+
+  get narrow() {
+    return this._narrow;
   }
 
   render() {
@@ -55,11 +65,28 @@ class ReefBotPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-press]").forEach((button) => {
       button.addEventListener("click", () => this.pressButton(button.dataset.press));
     });
+    this.shadowRoot.querySelectorAll("[data-menu]").forEach((button) => {
+      button.addEventListener("click", () => this.toggleMenu());
+    });
+    this.updateMenuButton();
   }
 
   pressButton(entityId) {
     if (!entityId || !this._hass) return;
     this._hass.callService("button", "press", { entity_id: entityId });
+  }
+
+  toggleMenu() {
+    this.dispatchEvent(
+      new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true })
+    );
+  }
+
+  updateMenuButton() {
+    const button = this.shadowRoot?.querySelector("[data-menu]");
+    if (button) {
+      button.hidden = !this._narrow;
+    }
   }
 }
 
@@ -133,6 +160,9 @@ function renderHeader(model) {
   const lastUpdate = model.lastUpdate?.state && model.lastUpdate.state !== "unknown" ? model.lastUpdate.state : "-";
   return `
     <header class="header">
+      <button class="menu-button" data-menu hidden title="Open sidebar">
+        <ha-icon icon="mdi:menu"></ha-icon>
+      </button>
       <div class="brand-mark">
         <span></span><span></span><span></span><i></i>
       </div>
@@ -487,10 +517,23 @@ const styles = `
 
   .header {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto auto 1fr auto;
     gap: 18px;
     align-items: center;
     margin-bottom: 18px;
+  }
+  .menu-button {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #edf7fa;
+  }
+  .menu-button[hidden] {
+    display: none;
   }
   .brand-mark {
     width: 74px;
