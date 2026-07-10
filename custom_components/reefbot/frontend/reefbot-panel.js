@@ -19,6 +19,18 @@ class ReefBotPanel extends HTMLElement {
 
   connectedCallback() {
     this.render();
+    this._progressTimer = window.setInterval(() => {
+      if (this._hass && isChamberActive(buildModel(this._hass, this._lastPressed))) {
+        this.render();
+      }
+    }, 30000);
+  }
+
+  disconnectedCallback() {
+    if (this._progressTimer) {
+      window.clearInterval(this._progressTimer);
+      this._progressTimer = undefined;
+    }
   }
 
   set narrow(value) {
@@ -117,6 +129,91 @@ class ReefBotPanel extends HTMLElement {
 
 customElements.define("reefbot-panel", ReefBotPanel);
 
+const TEST_DURATIONS_MINUTES = [
+  { names: ["RedSea Alkalinity", "RedSea Alkalinity Pro", "Red Sea Alkalinity Pro"], minutes: 26 },
+  { names: ["RedSea Phosphate Pro Low Range", "RedSea PO4 Pro Low Range", "RedSea PO4 Pro Low Range 13 drops"], minutes: 57 },
+  { names: ["RedSea Phosphate Pro High Range", "RedSea PO4 Pro High Range"], minutes: 57 },
+  { names: ["RedSea Calcium"], minutes: 37 },
+  { names: ["RedSea Magnesium"], minutes: 59 },
+  { names: ["Fauna Marin AquaHome Nitrate", "Fauna Marin NO3", "FaunaMarin NO3"], minutes: 50 },
+  { names: ["Fauna Marin AquaHome Nitrite", "Fauna Marin AquaHome NO2", "FaunaMarin NO2"], minutes: 50 },
+  { names: ["Fauna Marin Aquahome Phospate", "Fauna Marin AquaHome Phosphate"], minutes: 45 },
+  { names: ["Fauna Marin KH"], minutes: 37 },
+  { names: ["Colombo phosphate", "Colombo PO4", "Colombo PO4 Saltwater"], minutes: 55 },
+  { names: ["Colombo KH Aquatest"], minutes: 37 },
+  { names: ["Colombo Magnesium"], minutes: 59 },
+  { names: ["Colombo Ammonia"], minutes: 59 },
+  { names: ["Colombo pH fresh"], minutes: 20 },
+  { names: ["Colombo GH"], minutes: 15 },
+  { names: ["Colombo Iron"], minutes: 60 },
+  { names: ["Colombo Silicate"], minutes: 45 },
+  { names: ["Colombo Nitrite"], minutes: 59 },
+  { names: ["API Alkalinity"], minutes: 24 },
+  { names: ["API Calcium"], minutes: 36 },
+  { names: ["API Nitrate"], minutes: 49 },
+  { names: ["API Nitrite"], minutes: 32 },
+  { names: ["API Phosphate"], minutes: 45 },
+  { names: ["API Ammonia"], minutes: 38 },
+  { names: ["API GH"], minutes: 21 },
+  { names: ["API Copper"], minutes: 40 },
+  { names: ["API pH Fresh"], minutes: 22 },
+  { names: ["API High Range pH"], minutes: 24 },
+  { names: ["Tropic Marin Nitrate Pro"], minutes: 59 },
+  { names: ["Tropic Marin Nitrite Pro"], minutes: 59 },
+  { names: ["Tropic Marin Phosphate Pro"], minutes: 41 },
+  { names: ["Tropic Marin KH"], minutes: 45 },
+  { names: ["Tropic Marin KH Pro"], minutes: 37 },
+  { names: ["Tropic Marin GH"], minutes: 45 },
+  { names: ["Tropic Marin pH fresh"], minutes: 24 },
+  { names: ["Tropic Marin pH salt"], minutes: 24 },
+  { names: ["Salifert alkalinity"], minutes: 35 },
+  { names: ["Salifert Calcium"], minutes: 59 },
+  { names: ["Salifert Ammonia"], minutes: 48 },
+  { names: ["Salifert GH"], minutes: 24 },
+  { names: ["Salifert pH"], minutes: 24 },
+  { names: ["Giesemann Phosphate"], minutes: 49 },
+  { names: ["Giesemann Magnesium"], minutes: 59 },
+  { names: ["Giesemann Alkalinity"], minutes: 48 },
+  { names: ["Giesemann Ammonia"], minutes: 59 },
+  { names: ["Giesmann Nitrite"], minutes: 20 },
+  { names: ["Giesmann Iron"], minutes: 40 },
+  { names: ["Giesmann Ammonium"], minutes: 60 },
+  { names: ["Giesemann Aquaristic Iodine", "Giesemann Aquaristic lodine"], minutes: 45 },
+  { names: ["Elos KH Wateranalysis"], minutes: 24 },
+  { names: ["Elos Cu Wateranalysis"], minutes: 37 },
+  { names: ["Elos Phosphate"], minutes: 35 },
+  { names: ["Elos Ammonium"], minutes: 52 },
+  { names: ["Elos pH"], minutes: 20 },
+  { names: ["Elos GH"], minutes: 20 },
+  { names: ["Elos Iron"], minutes: 40 },
+  { names: ["Elos NO2 wateranalysis"], minutes: 24 },
+  { names: ["NTLABS Phosphate Fresh"], minutes: 24 },
+  { names: ["NTLABS Phosphate Marine"], minutes: 59 },
+  { names: ["NTLABS Nitrate"], minutes: 48 },
+  { names: ["NTLABS Calcium"], minutes: 48 },
+  { names: ["NTLABS Ammonia"], minutes: 50 },
+  { names: ["NTLABS Nitrite"], minutes: 25 },
+  { names: ["NTLABS Marine Alkalinity"], minutes: 24 },
+  { names: ["NTLABS Alkalinity"], minutes: 36 },
+  { names: ["NTLABS pH Marine"], minutes: 24 },
+  { names: ["NTLABS pH Freshwater"], minutes: 24 },
+  { names: ["NTLABS General Hardness"], minutes: 37 },
+  { names: ["Aquaforest Alkalinity"], minutes: 41 },
+  { names: ["JBL Alkalinity"], minutes: 37 },
+  { names: ["JBL General Hardness"], minutes: 20 },
+  { names: ["JBL Silicate"], minutes: 45 },
+  { names: ["JBL Carbon dioxide"], minutes: 37 },
+  { names: ["JBL Iron"], minutes: 37 },
+  { names: ["JBL pH"], minutes: 37 },
+  { names: ["H2Ocean Magnesium"], minutes: 59 },
+  { names: ["H2Ocean Alkalinity"], minutes: 27 },
+  { names: ["Monitor Calcium Saltwater"], minutes: 37 },
+  { names: ["Monitor Calcium Freshwater"], minutes: 37 },
+  { names: ["Monitor Alkalinity Reef"], minutes: 35 },
+  { names: ["Monitor Total Alkalinity"], minutes: 35 },
+  { names: ["Monitor Ammonia"], minutes: 37 },
+];
+
 function buildModel(hass, lastPressed) {
   const states = Object.values(hass.states);
   const configuredTests = states
@@ -166,6 +263,7 @@ function buildModel(hass, lastPressed) {
         value: state.state,
         unit: state.attributes.unit_of_measurement || "",
         history: extractHistory(state),
+        operationName: configured?.name,
         button: configured?.button || findTestButton(states, [name]),
       };
     });
@@ -221,7 +319,7 @@ function renderTests(model) {
     const disabled = button && button.state === "unavailable" ? "disabled" : "";
     return `
       <article class="test-card">
-        <button class="play" ${button ? `data-press="${button.entity_id}" data-label="${escapeHtml(test.name)}"` : "disabled"} ${disabled} title="Start test">
+        <button class="play" ${button ? `data-press="${button.entity_id}" data-label="${escapeHtml(test.operationName || test.name)}"` : "disabled"} ${disabled} title="Start test">
           <ha-icon icon="mdi:play"></ha-icon>
         </button>
         <div class="test-main">
@@ -327,16 +425,12 @@ function renderSyringe(component) {
 }
 
 function renderChamber(model) {
-  const current = model.currentOperation;
-  const pending = model.pending;
-  const stateOperation = activeState(current?.state) ? current.state : undefined;
-  const pendingValue = activeState(pending?.state) ? pending.state : "0";
-  const recentPress = model.lastPressed && Date.now() - model.lastPressed.time < 20 * 60 * 1000
-    ? model.lastPressed
-    : undefined;
-  const operation = stateOperation || (recentPress ? `Request sent: ${recentPress.name}` : model.recentOperation?.name || "Idle");
+  const pendingValue = activeState(model.pending?.state) ? model.pending.state : "0";
+  const chamber = chamberOperation(model);
+  const operation = chamber.name || "Idle";
   const active = isChamberActive(model);
   const stateLabel = active ? "Active" : model.recentOperation ? "Last" : "Idle";
+  const progress = active ? chamberProgress(chamber) : undefined;
   return `
     <section class="chamber">
       <div class="section-title small">
@@ -354,18 +448,103 @@ function renderChamber(model) {
         </div>
       </div>
       <strong>${escapeHtml(operation)}</strong>
-      <p>${escapeHtml(pendingValue)} pending operation${pendingValue === "1" ? "" : "s"}</p>
+      ${progress ? renderChamberProgress(progress) : `<p>${escapeHtml(pendingValue)} pending operation${pendingValue === "1" ? "" : "s"}</p>`}
     </section>
   `;
 }
 
 function isChamberActive(model) {
+  const operation = chamberOperation(model);
+  return Boolean(operation.active);
+}
+
+function chamberOperation(model) {
   const current = model.currentOperation;
-  const pending = model.pending;
-  const stateOperation = activeState(current?.state);
-  const pendingActive = activeState(pending?.state);
-  const recentPress = model.lastPressed && Date.now() - model.lastPressed.time < 20 * 60 * 1000;
-  return Boolean(stateOperation || pendingActive || recentPress);
+  const currentAttrs = current?.attributes || {};
+  const currentName = activeState(current?.state)
+    ? current.state
+    : currentAttrs.name || currentAttrs.operation_name || currentAttrs.display_name;
+  const currentActive = Boolean(currentAttrs.pending) || activeState(current?.state);
+  if (currentActive && activeState(currentName)) {
+    return {
+      active: true,
+      name: currentName,
+      startedAt: parseDate(currentAttrs.added || currentAttrs.date || currentAttrs.request_date || currentAttrs.added_date),
+      expectedAt: parseDate(currentAttrs.expected_completion_time || currentAttrs.expected_completion || currentAttrs.estimated_completion_time),
+    };
+  }
+
+  const pending = firstPendingOperation(model.pending);
+  if (pending) {
+    return pending;
+  }
+
+  const recentPress = model.lastPressed && Date.now() - model.lastPressed.time < recentPressWindow(model.lastPressed.name)
+    ? model.lastPressed
+    : undefined;
+  if (recentPress) {
+    return {
+      active: true,
+      name: recentPress.name,
+      startedAt: recentPress.time,
+    };
+  }
+
+  return {
+    active: false,
+    name: model.recentOperation?.name,
+    startedAt: parseDate(model.recentOperation?.date),
+  };
+}
+
+function firstPendingOperation(pendingSensor) {
+  const pending = pendingSensor?.attributes?.pending;
+  if (!Array.isArray(pending)) return undefined;
+  const item = pending.find((row) => activeState(row?.name || row?.operation || row?.display_name));
+  if (!item) return undefined;
+  return {
+    active: true,
+    name: item.name || item.operation || item.display_name,
+    startedAt: parseDate(item.added || item.date || item.request_date || item.added_date),
+    expectedAt: parseDate(item.expected_completion_time || item.expected_completion || item.estimated_completion_time),
+  };
+}
+
+function recentPressWindow(name) {
+  const duration = durationForTest(name) || 20;
+  return (duration + 5) * 60 * 1000;
+}
+
+function chamberProgress(operation) {
+  if (!operation?.name) return undefined;
+  const durationMinutes = durationForTest(operation.name);
+  if (!durationMinutes) return undefined;
+  const durationMs = durationMinutes * 60 * 1000;
+  const expectedAt = operation.expectedAt;
+  const startedAt = operation.startedAt || (expectedAt ? expectedAt - durationMs : undefined);
+  if (!startedAt) {
+    return {
+      durationMinutes,
+      percent: 0,
+      remainingMs: durationMs,
+    };
+  }
+  const elapsedMs = Math.max(0, Date.now() - startedAt);
+  const remainingMs = Math.max(0, durationMs - elapsedMs);
+  return {
+    durationMinutes,
+    percent: clamp((elapsedMs / durationMs) * 100, 0, 100),
+    remainingMs,
+  };
+}
+
+function renderChamberProgress(progress) {
+  return `
+    <div class="chamber-progress" title="${progress.durationMinutes} min scheduled duration">
+      <span style="width:${progress.percent}%"></span>
+    </div>
+    <p>${formatRemaining(progress.remainingMs)} remaining · ${Math.round(progress.percent)}% · ${progress.durationMinutes} min test</p>
+  `;
 }
 
 function renderStatus(model) {
@@ -542,6 +721,49 @@ function activeState(value) {
   if (value === undefined || value === null) return false;
   const text = String(value).trim().toLowerCase();
   return text !== "" && text !== "0" && text !== "unknown" && text !== "unavailable" && text !== "none" && text !== "idle";
+}
+
+function durationForTest(name) {
+  const keys = searchAliases(name).map(normalize).filter(Boolean);
+  const matches = TEST_DURATIONS_MINUTES
+    .map((entry) => ({
+      ...entry,
+      score: entry.names.reduce((best, candidate) => Math.max(best, matchScore(keys, candidate)), 0),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return matches[0]?.minutes;
+}
+
+function matchScore(keys, candidate) {
+  const values = searchAliases(candidate).map(normalize).filter(Boolean);
+  let score = 0;
+  keys.forEach((key) => {
+    values.forEach((value) => {
+      if (!key || !value) return;
+      if (key === value) score = Math.max(score, 1000 + value.length);
+      if (key.includes(value)) score = Math.max(score, 500 + value.length);
+      if (value.includes(key)) score = Math.max(score, 250 + key.length);
+    });
+  });
+  return score;
+}
+
+function parseDate(value) {
+  if (!value) return undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatRemaining(value) {
+  if (!Number.isFinite(value)) return "-";
+  if (value <= 0) return "0 min";
+  const minutes = Math.ceil(value / 60000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
 function formatNumber(value) {
@@ -1205,6 +1427,22 @@ const styles = `
   .chamber p {
     margin-top: 5px;
     color: #9daeb5;
+  }
+  .chamber-progress {
+    height: 8px;
+    margin-top: 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .chamber-progress span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #35c8e8, #ffd16c);
+    box-shadow: 0 0 14px rgba(53, 200, 232, 0.36);
+    transition: width 0.5s ease;
   }
 
   .status-list h2 {
