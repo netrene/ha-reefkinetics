@@ -119,6 +119,21 @@ customElements.define("reefbot-panel", ReefBotPanel);
 
 function buildModel(hass, lastPressed) {
   const states = Object.values(hass.states);
+  const configuredTests = states
+    .filter(isConfiguredTestSensor)
+    .map((state) => ({
+      entityId: state.entity_id,
+      name: state.attributes.display_name || state.attributes.friendly_name || state.entity_id,
+      parameter: state.state,
+      latest: state.attributes.latest_result,
+      button: findTestButton(states, [
+        state.attributes.display_name,
+        state.attributes.operation_name,
+        state.attributes.method,
+        state.state,
+      ]),
+    }));
+
   const tubes = states
     .filter((state) => state.entity_id.startsWith("sensor.") && state.attributes?.tube_number)
     .sort((a, b) => Number(a.attributes.tube_number) - Number(b.attributes.tube_number))
@@ -144,22 +159,16 @@ function buildModel(hass, lastPressed) {
     .slice(0, 6)
     .map((state) => {
       const name = state.attributes.parameter_name || state.attributes.friendly_name || state.entity_id;
+      const configured = findConfiguredTestForParameter(configuredTests, name);
       return {
         entityId: state.entity_id,
         name,
         value: state.state,
         unit: state.attributes.unit_of_measurement || "",
         history: extractHistory(state),
-        button: findTestButton(states, name),
+        button: configured?.button || findTestButton(states, [name]),
       };
     });
-
-  const configuredTests = states
-    .filter(isConfiguredTestSensor)
-    .map((state) => ({
-      name: state.attributes.display_name || state.attributes.friendly_name || state.entity_id,
-      latest: state.attributes.latest_result,
-    }));
 
   return {
     tubes,
@@ -171,6 +180,7 @@ function buildModel(hass, lastPressed) {
     online: findOnline(states),
     currentOperation: findByName(states, ["current operation"]),
     pending: findByName(states, ["pending operations"]),
+    recentOperation: recentOperationFromHistory(findByName(states, ["pending operations"])),
     lastPressed,
     notifications: findByName(states, ["notifications"]),
     alarms: findByName(states, ["alarm logs", "safe margins"]),
@@ -238,11 +248,8 @@ function renderMachine(model) {
   const tubes = Array.from({ length: 8 }, (_, index) => model.tubes[index] || emptyTube(index + 1));
   return `
     <section class="machine">
-      <div class="machine-frame">
+        <div class="machine-frame">
         <div class="top-rail"></div>
-        <div class="cable-chain">
-          ${Array.from({ length: 15 }, (_, index) => `<i style="--i:${index}"></i>`).join("")}
-        </div>
         <div class="gantry"></div>
         <div class="led-strip"></div>
         <div class="vial-row">
@@ -261,6 +268,7 @@ function renderVial(tube) {
       <button class="mini-reset" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-label="Refill Tube ${tube.number}"` : "disabled"} title="Refill tube">
         <ha-icon icon="mdi:restore"></ha-icon>
       </button>
+      <div class="vial-cap"></div>
       <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
         <span>${escapeHtml(label)}</span>
         <i></i>
@@ -320,13 +328,14 @@ function renderChamber(model) {
   const recentPress = model.lastPressed && Date.now() - model.lastPressed.time < 20 * 60 * 1000
     ? model.lastPressed
     : undefined;
-  const operation = stateOperation || (recentPress ? `Request sent: ${recentPress.name}` : "Idle");
-  const active = operation !== "Idle" || pendingValue !== "0";
+  const operation = stateOperation || (recentPress ? `Request sent: ${recentPress.name}` : model.recentOperation?.name || "Idle");
+  const active = Boolean(stateOperation || recentPress || pendingValue !== "0");
+  const stateLabel = active ? "Active" : model.recentOperation ? "Last" : "Idle";
   return `
     <section class="chamber">
       <div class="section-title small">
         <h2>Test chamber</h2>
-        <span class="${active ? "warn" : "good"}">${active ? "Active" : "Idle"}</span>
+        <span class="${active ? "warn" : "good"}">${stateLabel}</span>
       </div>
       <div class="chamber-art ${active ? "active" : ""}">
         <div class="cuvette"><i></i></div>
@@ -398,13 +407,37 @@ function isReefBotEntity(state) {
     || name.includes("reef bot");
 }
 
-function findTestButton(states, testName) {
-  const key = normalize(testName);
+function findTestButton(states, searchTerms) {
+  const keys = searchTerms.flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
   return states.find((state) => {
     if (!state.entity_id.startsWith("button.")) return false;
     const name = normalize(entityName(state));
-    return name.includes(key) || key.includes(name);
+    return keys.some((key) => name.includes(key) || key.includes(name));
   });
+}
+
+function findConfiguredTestForParameter(configuredTests, parameterName) {
+  const keys = searchAliases(parameterName).map(normalize).filter(Boolean);
+  return configuredTests.find((test) => {
+    const haystack = [
+      test.name,
+      test.parameter,
+      test.latest?.operation,
+      test.latest?.brand,
+    ].flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
+    return keys.some((key) => haystack.some((value) => value.includes(key) || key.includes(value)));
+  });
+}
+
+function recentOperationFromHistory(pendingSensor) {
+  const history = pendingSensor?.attributes?.recent_history;
+  if (!Array.isArray(history)) return undefined;
+  const item = history.find((row) => activeState(row?.name || row?.operation || row?.display_name));
+  if (!item) return undefined;
+  return {
+    name: item.name || item.operation || item.display_name,
+    date: item.added || item.date || item.request_date || item.added_date,
+  };
 }
 
 function isParameterSensor(state) {
@@ -500,6 +533,17 @@ function normalize(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function searchAliases(value) {
+  const text = String(value || "").toLowerCase();
+  const aliases = [text];
+  if (text.includes("nitrate") || text.includes("no3")) aliases.push("no3", "nitrate");
+  if (text.includes("nitrite") || text.includes("no2")) aliases.push("no2", "nitrite");
+  if (text.includes("phosphate") || text.includes("po4")) aliases.push("po4", "phosphate");
+  if (text.includes("alkalinity") || text.includes("alk") || text.includes("kh")) aliases.push("alkalinity", "kh");
+  if (text.includes("calcium") || /\bca\b/.test(text)) aliases.push("calcium", "ca");
+  return aliases;
+}
+
 function shortenChemical(name) {
   return String(name || "")
     .replace(/^Tube\s+\d+:\s*/i, "")
@@ -509,12 +553,12 @@ function shortenChemical(name) {
 
 function chemicalColor(name, index) {
   const text = String(name).toLowerCase();
-  if (text.includes("kh") || text.includes("alk")) return "#d9b35f";
-  if (text.includes("no3") || text.includes("nitrate")) return "#d7895b";
-  if (text.includes("no2") || text.includes("nitrite")) return "#b889df";
-  if (text.includes("po4") || text.includes("phosphate")) return "#5eb7c7";
-  if (text.includes("calcium")) return "#d96f8f";
-  const palette = ["#d9a85f", "#67b7dc", "#8ecf80", "#d68adf", "#dd756c", "#75c7a8", "#c7b05e", "#8fa7e8"];
+  if (text.includes("kh") || text.includes("alk")) return "#d7bd76";
+  if (text.includes("no3") || text.includes("nitrate")) return "#cf865a";
+  if (text.includes("no2") || text.includes("nitrite")) return "#c77b52";
+  if (text.includes("po4") || text.includes("phosphate")) return "#b87955";
+  if (text.includes("calcium")) return "#c56f72";
+  const palette = ["#d7bd76", "#cf865a", "#c77b52", "#c18a5e", "#b87955", "#d09a6b", "#c08359", "#d3a15d"];
   return palette[(index - 1) % palette.length];
 }
 
@@ -744,26 +788,6 @@ const styles = `
     background: #30363a;
     box-shadow: inset 0 -12px 18px rgba(0,0,0,0.22);
   }
-  .cable-chain {
-    position: absolute;
-    width: 210px;
-    height: 66px;
-    left: 44%;
-    top: 132px;
-    border-radius: 60px;
-    border: 12px solid rgba(70, 78, 84, 0.72);
-    border-left-color: transparent;
-    animation: drift 6s ease-in-out infinite;
-  }
-  .cable-chain i {
-    position: absolute;
-    width: 7px;
-    height: 24px;
-    left: calc(var(--i) * 12px);
-    top: -7px;
-    background: rgba(0,0,0,0.25);
-    border-radius: 5px;
-  }
   .gantry {
     position: absolute;
     left: 9%;
@@ -803,18 +827,36 @@ const styles = `
     display: inline-grid;
     place-items: center;
     padding: 0;
-    margin-bottom: 8px;
+    margin-bottom: 9px;
+  }
+  .vial-cap {
+    width: min(50px, 72%);
+    height: 18px;
+    margin: 0 auto -2px;
+    border-radius: 7px 7px 4px 4px;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.08), transparent 30%),
+      linear-gradient(180deg, #22282c, #090d0f);
+    border: 1px solid rgba(255,255,255,0.16);
+    box-shadow: 0 5px 10px rgba(0,0,0,0.36);
+    position: relative;
+    z-index: 2;
   }
   .vial {
     position: relative;
-    width: min(54px, 78%);
-    height: 172px;
+    width: min(52px, 76%);
+    height: 166px;
     margin: 0 auto 9px;
-    border-radius: 11px 11px 18px 18px;
-    background: linear-gradient(90deg, rgba(255,255,255,0.22), rgba(255,255,255,0.04) 30%, rgba(255,255,255,0.16));
-    border: 2px solid rgba(255,255,255,0.28);
+    border-radius: 8px 8px 18px 18px;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.22), rgba(255,255,255,0.035) 32%, rgba(255,255,255,0.13)),
+      rgba(11, 13, 14, 0.72);
+    border: 2px solid rgba(210,220,220,0.27);
     overflow: hidden;
-    box-shadow: inset 0 0 18px rgba(0,0,0,0.32), 0 10px 22px rgba(0,0,0,0.3);
+    box-shadow:
+      inset 0 16px 18px rgba(0,0,0,0.34),
+      inset 0 0 18px rgba(0,0,0,0.42),
+      0 10px 22px rgba(0,0,0,0.3);
   }
   .vial i {
     position: absolute;
@@ -823,8 +865,10 @@ const styles = `
     bottom: 0;
     height: var(--fill);
     min-height: 8px;
-    background: linear-gradient(180deg, color-mix(in srgb, var(--liquid), white 20%), var(--liquid));
-    opacity: 0.86;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.20), transparent 26%, rgba(0,0,0,0.08)),
+      linear-gradient(180deg, color-mix(in srgb, var(--liquid), white 18%), var(--liquid));
+    opacity: 0.9;
     animation: liquidPulse 3.8s ease-in-out infinite;
   }
   .vial i::before {
@@ -1006,10 +1050,6 @@ const styles = `
   @keyframes liquidPulse {
     0%, 100% { filter: brightness(1); }
     50% { filter: brightness(1.12); }
-  }
-  @keyframes drift {
-    0%, 100% { transform: translateX(-8px); }
-    50% { transform: translateX(8px); }
   }
   @keyframes spin {
     to { transform: rotate(360deg); }
