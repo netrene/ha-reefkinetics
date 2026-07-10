@@ -5,6 +5,7 @@ class ReefBotPanel extends HTMLElement {
     this._hass = undefined;
     this._lastRender = 0;
     this._narrow = false;
+    this._lastPressed = undefined;
   }
 
   set hass(hass) {
@@ -35,7 +36,7 @@ class ReefBotPanel extends HTMLElement {
       return;
     }
 
-    const model = buildModel(this._hass);
+    const model = buildModel(this._hass, this._lastPressed);
     this.shadowRoot.innerHTML = `
       <style>${styles}</style>
       <main class="page">
@@ -63,7 +64,7 @@ class ReefBotPanel extends HTMLElement {
     `;
 
     this.shadowRoot.querySelectorAll("[data-press]").forEach((button) => {
-      button.addEventListener("click", () => this.pressButton(button.dataset.press));
+      button.addEventListener("click", () => this.pressButton(button));
     });
     this.shadowRoot.querySelectorAll("[data-menu]").forEach((button) => {
       button.addEventListener("click", () => this.toggleMenu());
@@ -71,9 +72,33 @@ class ReefBotPanel extends HTMLElement {
     this.updateMenuButton();
   }
 
-  pressButton(entityId) {
+  pressButton(button) {
+    const entityId = button?.dataset?.press;
     if (!entityId || !this._hass) return;
+    const name = button.dataset.label || entityName(this._hass.states[entityId]) || entityId;
+    this._lastPressed = {
+      entityId,
+      name,
+      time: Date.now(),
+    };
+    this.render();
     this._hass.callService("button", "press", { entity_id: entityId });
+    this.refreshReefBotEntities();
+  }
+
+  refreshReefBotEntities() {
+    if (!this._hass) return;
+    const entities = Object.values(this._hass.states)
+      .filter((state) => state.entity_id.startsWith("sensor.") || state.entity_id.startsWith("binary_sensor."))
+      .filter((state) => isReefBotEntity(state))
+      .map((state) => state.entity_id);
+    if (!entities.length) return;
+
+    [1000, 5000, 15000].forEach((delay) => {
+      window.setTimeout(() => {
+        this._hass.callService("homeassistant", "update_entity", { entity_id: entities });
+      }, delay);
+    });
   }
 
   toggleMenu() {
@@ -92,10 +117,10 @@ class ReefBotPanel extends HTMLElement {
 
 customElements.define("reefbot-panel", ReefBotPanel);
 
-function buildModel(hass) {
+function buildModel(hass, lastPressed) {
   const states = Object.values(hass.states);
   const tubes = states
-    .filter((state) => state.attributes?.tube_number)
+    .filter((state) => state.entity_id.startsWith("sensor.") && state.attributes?.tube_number)
     .sort((a, b) => Number(a.attributes.tube_number) - Number(b.attributes.tube_number))
     .map((state) => {
       const number = Number(state.attributes.tube_number);
@@ -146,6 +171,7 @@ function buildModel(hass) {
     online: findOnline(states),
     currentOperation: findByName(states, ["current operation"]),
     pending: findByName(states, ["pending operations"]),
+    lastPressed,
     notifications: findByName(states, ["notifications"]),
     alarms: findByName(states, ["alarm logs", "safe margins"]),
     lastUpdate: findByName(states, ["last update", "letzte aktualisierung"]),
@@ -185,7 +211,7 @@ function renderTests(model) {
     const disabled = button && button.state === "unavailable" ? "disabled" : "";
     return `
       <article class="test-card">
-        <button class="play" ${button ? `data-press="${button.entity_id}"` : "disabled"} ${disabled} title="Start test">
+        <button class="play" ${button ? `data-press="${button.entity_id}" data-label="${escapeHtml(test.name)}"` : "disabled"} ${disabled} title="Start test">
           <ha-icon icon="mdi:play"></ha-icon>
         </button>
         <div class="test-main">
@@ -232,7 +258,7 @@ function renderVial(tube) {
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
   return `
     <article class="vial-card">
-      <button class="mini-reset" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}"` : "disabled"} title="Refill tube">
+      <button class="mini-reset" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-label="Refill Tube ${tube.number}"` : "disabled"} title="Refill tube">
         <ha-icon icon="mdi:restore"></ha-icon>
       </button>
       <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
@@ -253,7 +279,7 @@ function renderReservoir(component, title, icon, type) {
     <section class="reservoir ${type}">
       <div class="section-title small">
         <h2>${title}</h2>
-        <button ${action ? `data-press="${action.entity_id}"` : "disabled"}>${actionLabel}</button>
+        <button ${action ? `data-press="${action.entity_id}" data-label="${title}: ${actionLabel}"` : "disabled"}>${actionLabel}</button>
       </div>
       <div class="tank-wrap">
         <div class="tank" style="--fill:${fill}%">
@@ -276,7 +302,7 @@ function renderSyringe(component) {
     <section class="syringe">
       <div class="section-title small">
         <h2>Syringe</h2>
-        <button ${action ? `data-press="${action.entity_id}"` : "disabled"}>Replace</button>
+        <button ${action ? `data-press="${action.entity_id}" data-label="Syringe: Replace"` : "disabled"}>Replace</button>
       </div>
       <div class="usage-bar">
         <span style="width:${fill}%"></span>
@@ -289,8 +315,12 @@ function renderSyringe(component) {
 function renderChamber(model) {
   const current = model.currentOperation;
   const pending = model.pending;
-  const operation = current?.state && current.state !== "unknown" && current.state !== "unavailable" ? current.state : "Idle";
-  const pendingValue = pending?.state && pending.state !== "unknown" ? pending.state : "0";
+  const stateOperation = activeState(current?.state) ? current.state : undefined;
+  const pendingValue = activeState(pending?.state) ? pending.state : "0";
+  const recentPress = model.lastPressed && Date.now() - model.lastPressed.time < 20 * 60 * 1000
+    ? model.lastPressed
+    : undefined;
+  const operation = stateOperation || (recentPress ? `Request sent: ${recentPress.name}` : "Idle");
   const active = operation !== "Idle" || pendingValue !== "0";
   return `
     <section class="chamber">
@@ -360,6 +390,14 @@ function findButton(states, terms) {
   });
 }
 
+function isReefBotEntity(state) {
+  const name = entityName(state).toLowerCase();
+  return state.entity_id.includes("reefbot")
+    || state.entity_id.includes("reef_bot")
+    || name.includes("reefbot")
+    || name.includes("reef bot");
+}
+
 function findTestButton(states, testName) {
   const key = normalize(testName);
   return states.find((state) => {
@@ -419,12 +457,19 @@ function emptyTube(number) {
 }
 
 function entityName(state) {
+  if (!state) return "";
   return state.attributes?.friendly_name || state.entity_id;
 }
 
 function formatReading(value, unit) {
   if (value === undefined || value === null || value === "unknown" || value === "unavailable") return "-";
   return `${formatNumber(value)} ${unit || ""}`.trim();
+}
+
+function activeState(value) {
+  if (value === undefined || value === null) return false;
+  const text = String(value).trim().toLowerCase();
+  return text !== "" && text !== "0" && text !== "unknown" && text !== "unavailable" && text !== "none" && text !== "idle";
 }
 
 function formatNumber(value) {
