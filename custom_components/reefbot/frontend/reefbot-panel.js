@@ -55,21 +55,11 @@ class ReefBotPanel extends HTMLElement {
         <section class="shell">
           ${renderHeader(model)}
           <section class="content-grid">
-            <aside class="left-rail">
-              ${renderReservoir(model.rodi, "RODI", "mdi:water", "rodi")}
-              ${renderReservoir(model.waste, "Waste", "mdi:trash-can-outline", "waste")}
-              ${renderSyringe(model.syringe)}
-            </aside>
-
             <section class="center-stack">
               ${renderTests(model)}
               ${renderMachine(model)}
+              ${renderMaintenance(model)}
             </section>
-
-            <aside class="right-rail">
-              ${renderChamber(model)}
-              ${renderStatus(model)}
-            </aside>
           </section>
         </section>
       </main>
@@ -242,6 +232,9 @@ function buildModel(hass, lastPressed) {
       entityId: state.entity_id,
       name: state.attributes.display_name || state.attributes.friendly_name || state.entity_id,
       parameter: state.state,
+      operationName: state.attributes.operation_name,
+      method: state.attributes.method,
+      chemicals: Array.isArray(state.attributes.chemicals) ? state.attributes.chemicals : [],
       latest: state.attributes.latest_result,
       button: findTestButton(states, [
         state.attributes.display_name,
@@ -302,10 +295,11 @@ function buildModel(hass, lastPressed) {
     currentTestElapsed: findTimingSensor(states, "current_test_elapsed_time"),
     currentTestRemaining: findTimingSensor(states, "current_test_remaining_time"),
     currentTestProgress: findTimingSensor(states, "current_test_progress"),
-    recentOperation: recentOperationFromHistory(findPendingOperationsSensor(states)),
+    recentOperation: recentOperationFromHistory(findPendingOperationsSensor(states), configuredTests),
     lastPressed,
     notifications: findByName(states, ["notifications"]),
     alarms: findByName(states, ["alarm logs", "safe margins"]),
+    configuredTestsSummary: findByName(states, ["configured tests", "konfigurierte tests"]),
     lastUpdate: findByName(states, ["last update", "letzte aktualisierung"]),
     lastSuccessfulTest: findByName(states, ["last successful test", "letzter erfolgreicher test"]),
   };
@@ -316,6 +310,9 @@ function renderHeader(model) {
   const onlineText = online ? (online.state === "on" ? "Online" : "Offline") : "Unknown";
   const onlineClass = online?.state === "on" ? "good" : "warn";
   const lastUpdate = model.lastUpdate?.state && model.lastUpdate.state !== "unknown" ? model.lastUpdate.state : "-";
+  const configuredValue = model.configuredTestsSummary?.state && model.configuredTestsSummary.state !== "unknown"
+    ? model.configuredTestsSummary.state
+    : model.configuredTests.length || "-";
   return `
     <header class="header">
       <button class="menu-button" data-menu hidden title="Open sidebar">
@@ -329,10 +326,23 @@ function renderHeader(model) {
         <p>Reagent control, tests, and maintenance</p>
       </div>
       <div class="header-metrics">
-        <div><b class="${onlineClass}">${onlineText}</b><span>Status</span></div>
-        <div><b>${escapeHtml(lastUpdate)}</b><span>Last update</span></div>
+        ${headerChip("Status", onlineText, online?.entity_id, onlineClass)}
+        ${headerChip("Last update", lastUpdate, model.lastUpdate?.entity_id)}
+        ${headerChip("Last successful", model.lastSuccessfulTest?.state || "-", model.lastSuccessfulTest?.entity_id)}
+        ${headerChip("Notifications", model.notifications?.state || "-", model.notifications?.entity_id)}
+        ${headerChip("Alarms", model.alarms?.state || "-", model.alarms?.entity_id)}
+        ${headerChip("Tests", configuredValue, model.configuredTestsSummary?.entity_id)}
       </div>
     </header>
+  `;
+}
+
+function headerChip(label, value, entityId, valueClass = "") {
+  return `
+    <div class="header-chip" ${entityId ? `data-more-info="${entityId}"` : ""}>
+      <b class="${valueClass}">${escapeHtml(value ?? "-")}</b>
+      <span>${escapeHtml(label)}</span>
+    </div>
   `;
 }
 
@@ -340,10 +350,9 @@ function renderTests(model) {
   const tests = model.tests.length ? model.tests : model.configuredTests;
   const cards = tests.slice(0, 5).map((test) => {
     const button = test.button;
-    const disabled = button && button.state === "unavailable" ? "disabled" : "";
     return `
       <article class="test-card" ${test.entityId ? `data-more-info="${test.entityId}"` : ""} title="Open history">
-        <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : "disabled"} ${disabled} title="Start test">
+        <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : "disabled"} title="Start test">
           <ha-icon icon="mdi:play"></ha-icon>
         </button>
         <div class="test-main">
@@ -369,9 +378,18 @@ function renderTests(model) {
 function renderMachine(model) {
   const tubes = Array.from({ length: 8 }, (_, index) => model.tubes[index] || emptyTube(index + 1));
   const active = isChamberActive(model);
+  const chamber = chamberOperation(model);
+  const activeTubes = activeTubeNumbers(model, chamber.name);
+  const sourceA = activeTubes[0] || 1;
+  const sourceB = activeTubes[1] || sourceA;
+  const frameStyle = [
+    `--source-a-left:${slotLeft(sourceA)}`,
+    `--source-b-left:${slotLeft(sourceB)}`,
+    `--chamber-left:${slotLeft(9)}`,
+  ].join("; ");
   return `
     <section class="machine">
-      <div class="machine-frame ${active ? "active-test" : ""}">
+      <div class="machine-frame ${active ? "active-test" : ""}" style="${frameStyle}">
         <div class="top-rail"></div>
         <div class="syringe-carriage">
           <div class="syringe-body"><span></span></div>
@@ -381,9 +399,36 @@ function renderMachine(model) {
         <div class="led-strip"></div>
         <div class="vial-row">
           ${tubes.map(renderVial).join("")}
+          ${renderChamberVial(model)}
         </div>
       </div>
     </section>
+  `;
+}
+
+function renderChamberVial(model) {
+  const pendingValue = activeState(model.pending?.state) ? model.pending.state : "0";
+  const chamber = chamberOperation(model);
+  const operation = chamber.name || "Idle";
+  const active = isChamberActive(model);
+  const prefix = active ? "Live: " : model.recentOperation ? "Last: " : "";
+  const progress = active ? chamberProgress(chamber, model) : undefined;
+  return `
+    <article class="vial-card chamber-slot">
+      <div class="chamber-vial ${active ? "active" : ""}">
+        <div class="measure-beam beam-left"></div>
+        <div class="measure-beam beam-right"></div>
+        <span class="drop-stream one"></span>
+        <span class="drop-stream two"></span>
+        <i></i>
+        <span class="swirl one"></span>
+        <span class="swirl two"></span>
+        <span class="stir-bar"></span>
+      </div>
+      <strong>Test Chamber</strong>
+      <p>${escapeHtml(`${prefix}${operation}`)}</p>
+      ${progress ? renderChamberProgress(progress) : `<small>${escapeHtml(pendingValue)} pending</small>`}
+    </article>
   `;
 }
 
@@ -448,6 +493,49 @@ function renderSyringe(component) {
   `;
 }
 
+function renderMaintenance(model) {
+  return `
+    <section class="maintenance-bar">
+      ${renderCompactReservoir(model.rodi, "RODI", "mdi:water", "rodi")}
+      ${renderCompactReservoir(model.waste, "Waste", "mdi:trash-can-outline", "waste")}
+      ${renderCompactSyringe(model.syringe)}
+    </section>
+  `;
+}
+
+function renderCompactReservoir(component, title, icon, type) {
+  const fill = clamp(component?.percentage ?? 0, 0, 100);
+  const action = component?.button;
+  const actionLabel = type === "waste" ? "Empty" : "Refill";
+  return `
+    <article class="maintenance-item ${type}">
+      <ha-icon icon="${icon}"></ha-icon>
+      <div class="maintenance-main">
+        <strong>${title}</strong>
+        <span>${escapeHtml(component?.display || "-")} · ${Math.round(fill)}%</span>
+        <div class="mini-level"><i style="width:${fill}%"></i></div>
+      </div>
+      <button ${action ? `data-press="${action.entity_id}" data-label="${title}: ${actionLabel}"` : "disabled"}>${actionLabel}</button>
+    </article>
+  `;
+}
+
+function renderCompactSyringe(component) {
+  const fill = clamp(component?.percentage ?? 0, 0, 100);
+  const action = component?.button;
+  return `
+    <article class="maintenance-item syringe-compact">
+      <ha-icon icon="mdi:needle"></ha-icon>
+      <div class="maintenance-main">
+        <strong>Syringe</strong>
+        <span>${escapeHtml(component?.display || "-")}</span>
+        <div class="mini-level"><i style="width:${fill}%"></i></div>
+      </div>
+      <button ${action ? `data-press="${action.entity_id}" data-label="Syringe: Replace"` : "disabled"}>Replace</button>
+    </article>
+  `;
+}
+
 function renderChamber(model) {
   const pendingValue = activeState(model.pending?.state) ? model.pending.state : "0";
   const chamber = chamberOperation(model);
@@ -499,7 +587,7 @@ function chamberOperation(model) {
     };
   }
 
-  const pending = firstPendingOperation(model.pending);
+  const pending = firstPendingOperation(model.pending, model);
   if (pending) {
     return pending;
   }
@@ -522,12 +610,12 @@ function chamberOperation(model) {
   };
 }
 
-function firstPendingOperation(pendingSensor) {
+function firstPendingOperation(pendingSensor, model) {
   const pending = pendingSensor?.attributes?.pending;
   if (!Array.isArray(pending)) return undefined;
   const item = pending.find((row) => {
     const name = row?.name || row?.operation || row?.display_name;
-    return activeState(name) && isTestOperation(name);
+    return activeState(name) && isTestOperation(name, model);
   });
   if (!item) return undefined;
   return {
@@ -536,6 +624,21 @@ function firstPendingOperation(pendingSensor) {
     startedAt: parseDate(item.added || item.date || item.request_date || item.added_date),
     expectedAt: parseDate(item.expected_completion_time || item.expected_completion || item.estimated_completion_time),
   };
+}
+
+function activeTubeNumbers(model, operationName) {
+  if (!operationName) return [];
+  const match = findConfiguredTestForOperation(model.configuredTests, operationName);
+  if (!match?.chemicals?.length) return [];
+  return [...new Set(match.chemicals
+    .map((chemical) => Number(chemical.tube))
+    .filter((tube) => Number.isInteger(tube) && tube >= 1 && tube <= 8))];
+}
+
+function slotLeft(slot) {
+  const safeSlot = clamp(Number(slot) || 1, 1, 9);
+  const percent = 4.5 + ((safeSlot - 0.5) * 91 / 9);
+  return `calc(${percent}% - 34px)`;
 }
 
 function recentPressWindow(name) {
@@ -707,12 +810,27 @@ function findConfiguredTestForParameter(configuredTests, parameterName) {
   });
 }
 
-function recentOperationFromHistory(pendingSensor) {
+function findConfiguredTestForOperation(configuredTests, operationName) {
+  const keys = searchAliases(operationName).map(normalize).filter(Boolean);
+  return configuredTests.find((test) => {
+    const haystack = [
+      test.name,
+      test.operationName,
+      test.method,
+      test.parameter,
+      test.latest?.operation,
+      test.latest?.brand,
+    ].flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
+    return keys.some((key) => haystack.some((value) => value.includes(key) || key.includes(value)));
+  });
+}
+
+function recentOperationFromHistory(pendingSensor, configuredTests = []) {
   const history = pendingSensor?.attributes?.recent_history;
   if (!Array.isArray(history)) return undefined;
   const item = history.find((row) => {
     const name = row?.name || row?.operation || row?.display_name;
-    return activeState(name) && isTestOperation(name);
+    return activeState(name) && isTestOperation(name, { configuredTests });
   });
   if (!item) return undefined;
   return {
@@ -814,6 +932,8 @@ function isTestOperation(name, model) {
   return model.configuredTests.some((test) => {
     const haystack = [
       test.name,
+      test.operationName,
+      test.method,
       test.parameter,
       test.latest?.operation,
       test.latest?.brand,
@@ -997,31 +1117,32 @@ const styles = `
   h1 { font-size: 32px; letter-spacing: 0; }
   .header p { color: #91a2a9; margin-top: 4px; }
   .header-metrics {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(112px, 1fr));
     gap: 10px;
   }
-  .header-metrics div, .tests, .reservoir, .syringe, .chamber, .status-list {
+  .header-chip, .tests, .maintenance-item {
     background: rgba(16, 25, 28, 0.78);
     border: 1px solid rgba(156, 198, 211, 0.16);
     border-radius: 8px;
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
   }
-  .header-metrics div {
-    min-width: 150px;
+  .header-chip {
+    min-width: 0;
     padding: 13px 15px;
   }
-  .header-metrics b, .status-list b { display: block; font-size: 16px; }
-  .header-metrics span, .status-list span, .section-title span { color: #90a2aa; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .header-chip[data-more-info] {
+    cursor: pointer;
+  }
+  .header-chip b { display: block; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .header-chip span, .section-title span { color: #90a2aa; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
   .good { color: #70d58a; }
   .warn { color: #ffd16c; }
 
   .content-grid {
-    display: grid;
-    grid-template-columns: 210px minmax(600px, 1fr) 260px;
-    gap: 18px;
-    align-items: stretch;
+    display: block;
   }
-  .left-rail, .right-rail, .center-stack {
+  .center-stack {
     display: flex;
     flex-direction: column;
     gap: 18px;
@@ -1122,11 +1243,17 @@ const styles = `
   }
 
   .machine {
-    min-height: 560px;
+    min-height: 620px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+    scrollbar-color: rgba(102, 215, 247, 0.35) rgba(255,255,255,0.08);
+    -webkit-overflow-scrolling: touch;
   }
   .machine-frame {
     position: relative;
-    height: 560px;
+    width: 100%;
+    min-width: 1120px;
+    height: 620px;
     overflow: hidden;
     border-radius: 14px;
     background:
@@ -1158,8 +1285,8 @@ const styles = `
   }
   .syringe-carriage {
     position: absolute;
-    left: calc(4.5% + (91% / 16) - 34px);
-    top: 42px;
+    left: var(--source-a-left);
+    top: 54px;
     width: 64px;
     height: 190px;
     z-index: 2;
@@ -1167,7 +1294,7 @@ const styles = `
     transform: translateX(0);
   }
   .active-test .syringe-carriage {
-    animation: syringeTravel 8s ease-in-out infinite;
+    animation: syringeCollect 9s ease-in-out infinite;
   }
   .syringe-carriage::before {
     content: "";
@@ -1218,6 +1345,9 @@ const styles = `
       linear-gradient(180deg, rgba(255,255,255,0.75), rgba(255,255,255,0.15)),
       rgba(108, 215, 241, 0.34);
   }
+  .active-test .syringe-body span {
+    animation: syringeFill 9s ease-in-out infinite;
+  }
   .syringe-body span::before {
     content: "";
     position: absolute;
@@ -1250,14 +1380,7 @@ const styles = `
     box-shadow: 0 0 8px rgba(108, 215, 241, 0.28);
   }
   .syringe-needle::after {
-    content: "";
-    position: absolute;
-    left: -4px;
-    bottom: -8px;
-    border-top: 9px solid rgba(105, 215, 244, 0.8);
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    filter: drop-shadow(0 0 6px rgba(105, 215, 244, 0.5));
+    content: none;
   }
   .gantry {
     position: absolute;
@@ -1282,10 +1405,10 @@ const styles = `
     position: absolute;
     left: 4.5%;
     right: 4.5%;
-    bottom: 26px;
+    bottom: 34px;
     display: grid;
-    grid-template-columns: repeat(8, minmax(0, 1fr));
-    gap: 9px;
+    grid-template-columns: repeat(8, minmax(72px, 1fr)) minmax(92px, 1.2fr);
+    gap: 10px;
     align-items: end;
   }
   .vial-card {
@@ -1391,6 +1514,166 @@ const styles = `
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  .chamber-slot small {
+    display: block;
+    color: #9daeb5;
+    font-size: 11px;
+    margin-top: 5px;
+  }
+  .chamber-vial {
+    position: relative;
+    width: min(66px, 82%);
+    height: 198px;
+    margin: 0 auto 9px;
+    border-radius: 10px 10px 22px 22px;
+    border: 2px solid rgba(225,235,238,0.34);
+    overflow: hidden;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.04) 34%, rgba(255,255,255,0.12)),
+      rgba(8, 12, 14, 0.74);
+    box-shadow:
+      inset 0 18px 22px rgba(0,0,0,0.38),
+      inset 0 0 22px rgba(0,0,0,0.46),
+      0 12px 25px rgba(0,0,0,0.34);
+  }
+  .chamber-vial i {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 45%;
+    background: linear-gradient(180deg, rgba(135, 222, 241, 0.94), #1289a6);
+  }
+  .chamber-vial.active i {
+    animation: chamberLiquid 1.5s ease-in-out infinite;
+  }
+  .chamber-vial .swirl {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    height: 16px;
+    border-radius: 50%;
+    border-top: 2px solid rgba(255,255,255,0.36);
+    border-bottom: 1px solid rgba(255,255,255,0.13);
+    z-index: 2;
+    opacity: 0;
+  }
+  .chamber-vial .swirl.one { bottom: 58px; }
+  .chamber-vial .swirl.two { bottom: 42px; transform: rotate(180deg); }
+  .chamber-vial.active .swirl {
+    opacity: 1;
+    animation: stirSwirl 1.15s linear infinite;
+  }
+  .chamber-vial.active .swirl.two {
+    animation-delay: -0.45s;
+  }
+  .chamber-vial .stir-bar {
+    position: absolute;
+    left: 21px;
+    bottom: 22px;
+    width: 24px;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(230, 238, 238, 0.78);
+    box-shadow: 0 0 10px rgba(96, 214, 247, 0.45);
+    transform-origin: 50% 50%;
+    z-index: 2;
+  }
+  .chamber-vial.active .stir-bar {
+    animation: stirBar 0.8s linear infinite;
+  }
+  .chamber-vial .measure-beam {
+    position: absolute;
+    top: 96px;
+    width: 54px;
+    height: 4px;
+    opacity: 0;
+    background: linear-gradient(90deg, transparent, rgba(120, 229, 255, 0.95), transparent);
+    filter: drop-shadow(0 0 8px rgba(120, 229, 255, 0.75));
+    z-index: 3;
+  }
+  .chamber-vial .beam-left { left: -39px; }
+  .chamber-vial .beam-right { right: -39px; transform: rotate(180deg); }
+  .chamber-vial.active .measure-beam {
+    animation: sensorFlash 3.2s ease-in-out infinite;
+  }
+  .chamber-vial.active .beam-right {
+    animation-delay: 0.18s;
+  }
+  .drop-stream {
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(106, 217, 244, 0.9);
+    box-shadow: 0 0 8px rgba(106, 217, 244, 0.75);
+    opacity: 0;
+    z-index: 4;
+  }
+  .chamber-vial.active .drop-stream {
+    animation: dropletFall 9s ease-in-out infinite;
+  }
+  .chamber-vial.active .drop-stream.two {
+    animation-delay: 0.28s;
+  }
+
+  .maintenance-bar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .maintenance-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    padding: 12px;
+  }
+  .maintenance-item ha-icon {
+    color: #66d7f7;
+  }
+  .maintenance-main {
+    min-width: 0;
+  }
+  .maintenance-main strong,
+  .maintenance-main span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .maintenance-main span {
+    color: #aebdc4;
+    font-size: 13px;
+    margin-top: 2px;
+  }
+  .maintenance-item button {
+    background: rgba(0, 173, 217, 0.16);
+    color: #66d7f7;
+    border: 1px solid rgba(102, 215, 247, 0.28);
+    border-radius: 6px;
+    padding: 7px 10px;
+  }
+  .mini-level {
+    height: 6px;
+    margin-top: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+  }
+  .mini-level i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #5fd7f7, #1289a6);
+  }
+  .waste .mini-level i {
+    background: linear-gradient(90deg, #d9a85f, #7b5a2a);
   }
 
   .reservoir, .syringe, .chamber, .status-list {
@@ -1599,11 +1882,37 @@ const styles = `
     0%, 100% { filter: brightness(1); }
     50% { filter: brightness(1.12); }
   }
-  @keyframes syringeTravel {
-    0%, 100% { transform: translateX(0); }
-    18% { transform: translateX(0); }
-    42% { transform: translateX(345%); }
-    70% { transform: translateX(700%); }
+  @keyframes syringeCollect {
+    0%, 9% { left: var(--source-a-left); }
+    18%, 34% { left: var(--chamber-left); }
+    44%, 55% { left: var(--source-b-left); }
+    67%, 100% { left: var(--chamber-left); }
+  }
+  @keyframes syringeFill {
+    0%, 11%, 36%, 46%, 58%, 100% {
+      opacity: 0.28;
+      transform: scaleY(0.18);
+      transform-origin: bottom;
+    }
+    14%, 32%, 48%, 55% {
+      opacity: 0.9;
+      transform: scaleY(1);
+      transform-origin: bottom;
+    }
+  }
+  @keyframes dropletFall {
+    0%, 21%, 35%, 62%, 76%, 100% {
+      opacity: 0;
+      transform: translate(-50%, 0);
+    }
+    25%, 66% {
+      opacity: 1;
+      transform: translate(-50%, 24px);
+    }
+    33%, 74% {
+      opacity: 0;
+      transform: translate(-50%, 82px);
+    }
   }
   @keyframes chamberLiquid {
     0%, 100% { height: 48%; filter: hue-rotate(0deg); }
@@ -1623,13 +1932,8 @@ const styles = `
   }
 
   @media (max-width: 1350px) {
-    .content-grid {
-      grid-template-columns: 240px minmax(0, 1fr);
-    }
-    .right-rail {
-      grid-column: 1 / -1;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .header-metrics {
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
     }
     .test-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1637,15 +1941,11 @@ const styles = `
   }
 
   @media (max-width: 1100px) {
-    .content-grid {
+    .header-metrics {
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+    .maintenance-bar {
       grid-template-columns: 1fr;
-    }
-    .left-rail, .right-rail {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-    .active-test .syringe-carriage {
-      animation: syringeTravelTablet 8s ease-in-out infinite;
     }
   }
 
@@ -1657,13 +1957,11 @@ const styles = `
     .header-metrics {
       grid-column: 1 / -1;
       width: 100%;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .header-metrics div {
       min-width: 0;
       flex: 1;
-    }
-    .left-rail, .right-rail {
-      grid-template-columns: 1fr;
     }
     .machine {
       min-height: 0;
@@ -1672,12 +1970,13 @@ const styles = `
       scrollbar-color: rgba(102, 215, 247, 0.35) rgba(255,255,255,0.08);
     }
     .machine-frame {
-      width: 920px;
+      width: 1040px;
+      min-width: 1040px;
       max-width: none;
-      height: 560px;
+      height: 590px;
     }
     .syringe-carriage {
-      top: 42px;
+      top: 50px;
     }
     .test-grid {
       grid-template-columns: 1fr;
@@ -1686,19 +1985,13 @@ const styles = `
 
   @media (max-width: 480px) {
     .machine-frame {
-      width: 860px;
-      height: 540px;
+      width: 980px;
+      min-width: 980px;
+      height: 570px;
       border-width: 8px;
     }
     .syringe-carriage {
-      top: 40px;
+      top: 48px;
     }
-  }
-
-  @keyframes syringeTravelTablet {
-    0%, 100% { transform: translateX(0); }
-    18% { transform: translateX(0); }
-    42% { transform: translateX(345%); }
-    70% { transform: translateX(700%); }
   }
 `;
