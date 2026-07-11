@@ -41,6 +41,11 @@ Die Reef-Kinetics-API ist nicht offiziell dokumentiert. HAR-Dateien und echte Pa
 
 Die Integration redaktiert sensitive Felder in Diagnostics. Fuer App-Entwicklung sollten echte Zugangsdaten nur lokal oder in sicheren Secrets verwendet werden.
 
+Lokale, nicht versionierte Details zum aktuell analysierten Account liegen in
+`handoff.local.md`. Diese Datei enthaelt reale Account-/Device-IDs und ist
+lokal ueber `.git/info/exclude` von Git ausgeschlossen. Sie darf nicht in das
+oeffentliche Repo uebernommen werden.
+
 Sensible Felder:
 
 - `TOKEN`
@@ -345,6 +350,256 @@ Panel-Designentscheidung:
 - Dadurch bleibt Rechte-/Auth-Handling in der Integration und nicht im Browser-JS.
 
 Fuer native Apps ist das anders: dort kann direkt gegen die Reef-Kinetics-API gearbeitet werden. Das Panel ist aber ein guter UX-Prototyp.
+
+## Grafische Panel-Spezifikation fuer App-Nachbau
+
+Dieser Abschnitt beschreibt das aktuelle Panel so, dass eine native Android-
+oder iOS-App die Darstellung 1:1 als Produktprototyp nachbauen kann. Die
+konkrete Implementierung liegt in
+`custom_components/reefbot/frontend/reefbot-panel.js`.
+
+### Render-Struktur
+
+Die Frontend-Datei arbeitet mit einem View-Model aus `buildModel(hass,
+lastPressed)` und diesen Haupt-Renderern:
+
+| Renderer | Aufgabe |
+| --- | --- |
+| `renderHeader(model)` | Logo, Titel, Online, Pending Operation, Last Operation, Alarms & Status |
+| `renderTests(model)` | Test-Kacheln fuer die konfigurierten Messparameter |
+| `renderMachine(model)` | Zentrale ReefBot-Geraetegrafik |
+| `renderVial(tube)` | einzelnes Reagenz-Vial mit Fuellstand und Refill |
+| `renderChamberVial(model)` | Testkammer rechts neben den acht Reagenz-Vials |
+| `renderMaintenance(model)` | kompakte RODI/Waste/Syringe-Leiste unter dem Geraet |
+| `renderConfirmDialog(action)` | Confirmation fuer Teststart und Refill |
+| `renderAlarmDialog(model, open)` | Kombinierte Alarm-/Statusliste |
+
+Die wichtigsten CSS-/DOM-Bausteine:
+
+- `.page`, `.shell`, `.content-grid`, `.center-stack`
+- `.header`, `.brand-mark`, `.header-metrics`, `.header-chip`
+- `.tests`, `.test-grid`, `.test-card`, `.play`, `.result-trend`
+- `.machine`, `.machine-frame`, `.top-rail`, `.gantry`, `.led-strip`
+- `.syringe-carriage`, `.syringe-body`, `.syringe-needle`
+- `.vial-row`, `.vial-card`, `.vial-cap`, `.vial`, `.vial-refill`, `.vial-number`
+- `.chamber-slot`, `.chamber-vial`, `.chamber-operation`, `.chamber-progress`
+- `.maintenance-bar`, `.maintenance-item`, `.mini-level`
+- `.dialog-backdrop`, `.dialog-card`, `.alarm-dialog`
+
+### Geraete-Layout
+
+Das zentrale Element ist ein abstrahiertes ReefBot-Geraet, nicht eine normale
+Dashboard-Kachel:
+
+- Dunkles, breites Geraetegehaeuse mit dickem Rahmen.
+- Oben innen eine horizontale Fuehrungsschiene.
+- Darunter die bewegliche Spritze am Gantry.
+- Im unteren Bereich acht Reagenz-Vials.
+- Rechts neben Vial 8 sitzt die Testkammer als neunter Glaszylinder.
+- Unter dem Geraet liegen RODI, Waste und Syringe als kompakte Wartungsbalken.
+- Links und rechts neben dem Geraet sollen keine grossen Zusatzkarten mehr
+  stehen; Statusinformationen werden in den Header oder in Dialoge verschoben.
+
+Die Testkammer ist kein separates Dashboard-Widget. Sie ist Teil der
+Geraetegrafik, steht auf derselben horizontalen Linie wie die Vials und ist ca.
+14-20 Prozent groesser als ein Reagenz-Vial. Dadurch entspricht sie dem
+realen ReefBot-Aufbau besser.
+
+### Vials
+
+Jedes Reagenz-Vial besteht visuell aus:
+
+- schwarzem Deckel oben,
+- transparentem Glaszylinder,
+- farbigem Fuellstand mit leichtem Verlauf,
+- dezenter Oberflaechen-Welle,
+- 20-ml-Kalibrierstrich knapp unter dem Deckel,
+- aktuellem ml-Wert in der Fluessigkeit,
+- rotem Refill-Button auf dem unteren Bereich des Vials,
+- runder Nummernplakette `1` bis `8` unter dem Vial,
+- Chemical-Name unter der Nummer.
+
+Die Labels sollen nicht `Tube 1` im Vordergrund tragen. Primaeres Label ist
+die grosse Ziffer `1-8`; der Chemikalienname steht darunter.
+
+Farbkonzept der aktuellen Referenz:
+
+| Slot | Farbe/Anmutung |
+| --- | --- |
+| 1 | Bernstein/Gelb fuer KH Titrant |
+| 2 | Gelb-Orange |
+| 3 | Gruen |
+| 4 | Tuerkis |
+| 5 | Blau |
+| 6 | Violett |
+| 7 | Magenta |
+| 8 | Rot/Orange |
+| Testkammer | Blau/Cyan fuer Wasser/Reaktion |
+
+Die Refill-Buttons:
+
+- liegen mittig auf dem jeweiligen Vial,
+- sind rot,
+- liegen weit genug unten, damit Spritze/Nadel nicht verdeckt werden,
+- brauchen immer Confirmation,
+- loesen die zugehoerige HA-Button-Entity bzw. in einer App den
+  `UpdateDeviceAvailableChemicalsSettingsV2`-Flow aus.
+
+### Spritze und Animation
+
+Die Spritze ist vertikal und sitzt an einem horizontal beweglichen Schlitten:
+
+- Oben kleiner quadratischer Motor-/Schlittenblock.
+- Transparenter Spritzenkoerper mit Markierungsstrichen.
+- Innen ein leichter Cyan-Fuellstand, wenn bei aktivem Test Reagenz gezogen
+  wird.
+- Kurze Fluegel/Griffpartie seitlich.
+- Nadel unten ohne Dreieckspfeil.
+
+Bei aktivem Test:
+
+1. Spritze faehrt horizontal ueber die fuer den Test benoetigten Vials.
+2. Sie faehrt optisch etwas nach unten, um Fluessigkeit zu entnehmen.
+3. Sie faellt/entleert optisch in Richtung Testkammer.
+4. Tropfen kommen aus der Nadelspitze und fallen mittig in die Testkammer.
+5. Danach wiederholt sich die Sequenz, bis der Test beendet ist.
+
+In der aktuellen Panel-Implementierung ist die Bewegung CSS-basiert:
+
+- `--source-a-left`, `--source-b-left`, `--chamber-left` definieren Positionen.
+- `@keyframes syringeCollect` bewegt den Schlitten.
+- `@keyframes syringeFill` animiert die Fuellung im Spritzenkoerper.
+- Tropfen werden ueber Pseudo-Elemente der Nadel dargestellt.
+
+Wichtig fuer native Apps: Die Animation muss nur bei echten Tests laufen, nicht
+bei Maintenance-Aktionen wie `Empty Waste`, `Refill RODI` oder `Replace
+Syringe`.
+
+### Testkammer
+
+Die Testkammer zeigt:
+
+- Glaszylinder wie ein groesseres Vial,
+- Wasser/Fuellstand in Cyan,
+- Ruehrbewegung/Wasserwirbel,
+- kleinen Magnetruehrer unten,
+- kurze LED-/Messblitze von der Seite,
+- Status-Label `Live:` oder `Last:` plus Operation,
+- Fortschritt mit Restzeit, Prozent und Gesamtdauer.
+
+Logik:
+
+- `Live:` wird nur angezeigt, wenn `current_operation` wirklich ein aktiver
+  Test ist.
+- `Last:` zeigt den letzten Test/letzte Operation, aber ohne aktive Animation.
+- Maintenance-Operationen duerfen nicht als aktive Testkammeranimation
+  erscheinen.
+- Der Fortschritt soll bevorzugt aus den HA-Timing-Sensoren kommen:
+  - `current_test_duration`
+  - `current_test_elapsed_time`
+  - `current_test_remaining_time`
+  - `current_test_progress`
+- Fallback ist die hardcodierte Testdauer-Tabelle im Frontend, falls die
+  Sensoren fehlen.
+
+### Test-Kacheln
+
+Die aktuelle Zielvariante ist eine kompakte Ergebnis-Kachel:
+
+- runder Play-Button links,
+- Parametername und aktueller Wert prominent,
+- kurzer Trend der letzten drei Messwerte,
+- Zahlenwerte der letzten drei Messpunkte unter dem Trend,
+- Klick auf die Kachel oeffnet `hass-more-info` bzw. in einer App die
+  Detailhistorie.
+
+Teststart:
+
+- Play-Button darf nicht direkt ausloesen.
+- Immer Confirmation-Dialog zeigen.
+- Bei laufendem Test/Pending Operation sollten weitere Teststarts disabled
+  sein oder zumindest mit deutlicher Warnung blockiert werden.
+
+### Header und Status
+
+Header-Chips:
+
+- `Status`: ReefBot Online/Offline aus der ReefBot-Online-Entity.
+- `Pending operation`: aktuell laufender/pending Test.
+- `Last operation`: letzte bekannte Operation; Klick oeffnet Historie von
+  `current_operation`.
+- `Alarms & status`: Anzahl/Status, Klick oeffnet Dialog mit Alarm Logs und
+  Notifications.
+
+Nicht anzeigen:
+
+- fremde Entities aus anderen Integrationen,
+- reine Notifications als einzelne Header-Kachel ohne Mehrwert,
+- rohe IDs oder technische Labels im Hauptscreen.
+
+### Maintenance-Bar
+
+Unter dem Geraet:
+
+- `RODI`: aktueller Literwert, Kapazitaet, Prozent, Refill-Button.
+- `Waste`: aktueller Literwert, Kapazitaet, Prozent, Empty-Button.
+- `Syringe`: aktuelle Usage, Max Usage, Prozent, Replace-Button.
+
+Alle Maintenance-Aktionen brauchen Confirmation und duerfen die
+Testkammeranimation nicht starten.
+
+### Datenbindung fuer Native Apps
+
+Das HA-Panel liest `hass.states`; eine native App sollte denselben View-Model-
+Begriff direkt aus der Reef-Kinetics-API bauen:
+
+| UI-Element | HA-Quelle | Direkte API-Quelle |
+| --- | --- | --- |
+| Online | Online-Binary-Sensor | Device-/Tank-Device-Daten |
+| Messwerte | Parameter-Sensoren | `GetOperationResultsByTankIdWithColorsV2` |
+| Detailhistorie | Sensor-Attribute `history` | `GetOperationResultsByTankIdOperationParameterIdWithColors` |
+| Vials | Tube-Sensoren | `GetDeviceChemicalSettings` |
+| Konfigurierte Tests | Configured-test Sensoren | `GetAvailableOperations` + installierte Chemicals |
+| Teststart | Button-Entity | `OneTimeOperationRequest` |
+| Refill Tube | Button-Entity | `UpdateDeviceAvailableChemicalsSettingsV2` |
+| RODI/Waste/Syringe | Maintenance-Sensoren/Buttons/Numbers | `GetDeviceComponentSettings` + `UpdateDeviceComponentSettings` |
+| Aktueller Vorgang | Current-operation Sensor | `GetPendingOperationRequestsByTank` + Request History |
+| Timing | Timing-Sensoren | Operation Startzeit + Testdauer-Tabelle |
+| Alarme/Status | Alarm-/Notification-Sensoren | `GetAlarmLogsByTankId`, `GetUserNotifications` |
+
+### Responsiveness
+
+Desktop:
+
+- Header oben.
+- Tests als horizontale Kachelreihe.
+- ReefBot-Geraet breit und zentral.
+- Maintenance-Bar unten.
+
+Tablet:
+
+- Tests duerfen auf zwei Reihen umbrechen.
+- Geraet bleibt zentral, ggf. etwas schmaler.
+- Maintenance-Bar bleibt kompakt.
+
+Smartphone / Companion App:
+
+- Keine winzigen Vials erzwingen.
+- Geraetegrafik darf horizontal scrollbar sein oder als Zoom-/Carousel-
+  Bereich funktionieren.
+- Alternativ zwei Vial-Reihen `1-4` und `5-8` plus Testkammer darunter.
+- Touch-Ziele fuer Play, Refill und Maintenance mindestens fingerfreundlich.
+- Wichtige Werte nicht ausschliesslich ueber Hover/Tooltip erklaeren.
+
+### Offene visuelle Punkte
+
+- Tropfen muessen exakt aus der Nadelspitze und mittig in die Testkammer fallen.
+- Messblitz in der Testkammer soll sichtbarer werden.
+- Teststart-Buttons sollten waehrend laufender Tests konsequent blockieren.
+- Alarmdialog zeigt aktuell nur Daten, die die Integration als Alarm Logs oder
+  Notifications liefert. Die Original-Webseite scheint teils weitere
+  Statusmeldungen zu haben; dafuer braucht es noch einen frischen HAR der
+  Alarmglocke/Statusseite.
 
 ## App-Architekturvorschlag
 
