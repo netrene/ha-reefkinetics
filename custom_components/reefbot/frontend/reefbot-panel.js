@@ -341,7 +341,7 @@ function buildModel(hass, lastPressed) {
     currentTestProgress: findTimingSensor(states, "current_test_progress"),
     recentOperation: recentOperationFromHistory(findPendingOperationsSensor(states), configuredTests),
     lastPressed,
-    notifications: findReefBotByName(states, ["notifications"]),
+    notifications: findNotificationsSensor(states),
     alarmLogs: findReefBotByName(states, ["alarm logs", "alarm log", "alarm history", "alarmhistorie", "alarme"]),
     safeMargins: findReefBotByName(states, ["safe margins", "sicherheitsbereiche"]),
     configuredTestsSummary: findReefBotByName(states, ["configured tests", "konfigurierte tests"]),
@@ -498,6 +498,15 @@ function parseNotificationMessage(message) {
     date,
     alert,
   };
+}
+
+function findNotificationsSensor(states) {
+  return findReefBotByName(states, ["notifications", "benachrichtigungen", "statusmeldungen"])
+    || Object.values(states).find((state) => (
+      state.entity_id.startsWith("sensor.")
+      && isReefBotEntity(state)
+      && Array.isArray(state.attributes?.notifications)
+    ));
 }
 
 function alarmDetail(log) {
