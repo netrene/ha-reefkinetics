@@ -443,8 +443,6 @@ function renderChamberVial(model) {
       <div class="chamber-vial ${active ? "active" : ""}">
         <div class="measure-beam beam-left"></div>
         <div class="measure-beam beam-right"></div>
-        <span class="drop-stream one"></span>
-        <span class="drop-stream two"></span>
         <i></i>
         <span class="swirl one"></span>
         <span class="swirl two"></span>
@@ -1420,8 +1418,33 @@ const styles = `
     background: rgba(200, 218, 222, 0.72);
     box-shadow: 0 0 8px rgba(108, 215, 241, 0.28);
   }
+  .syringe-needle::before,
   .syringe-needle::after {
-    content: none;
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    width: 6px;
+    height: 8px;
+    border-radius: 50% 50% 58% 58%;
+    background:
+      radial-gradient(circle at 38% 28%, rgba(225, 252, 255, 0.95), transparent 38%),
+      linear-gradient(180deg, rgba(126, 226, 249, 0.96), rgba(41, 159, 189, 0.9));
+    box-shadow: 0 0 10px rgba(106, 217, 244, 0.82);
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.65);
+    z-index: 5;
+  }
+  .syringe-needle::after {
+    width: 4px;
+    height: 6px;
+  }
+  .active-test .syringe-needle::before {
+    animation: needleDropletFall 9s ease-in-out infinite;
+  }
+  .active-test .syringe-needle::after {
+    animation: needleDropletFall 9s ease-in-out infinite;
+    animation-delay: 0.28s;
   }
   .gantry {
     position: absolute;
@@ -1676,24 +1699,6 @@ const styles = `
   }
   .chamber-vial.active .beam-right {
     animation-delay: 0.18s;
-  }
-  .drop-stream {
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: rgba(106, 217, 244, 0.9);
-    box-shadow: 0 0 8px rgba(106, 217, 244, 0.75);
-    opacity: 0;
-    z-index: 4;
-  }
-  .chamber-vial.active .drop-stream {
-    animation: dropletFall 9s ease-in-out infinite;
-  }
-  .chamber-vial.active .drop-stream.two {
-    animation-delay: 0.28s;
   }
   .chamber-operation {
     min-height: 44px;
@@ -2005,18 +2010,18 @@ const styles = `
       transform-origin: bottom;
     }
   }
-  @keyframes dropletFall {
-    0%, 21%, 35%, 62%, 76%, 100% {
+  @keyframes needleDropletFall {
+    0%, 20%, 35%, 63%, 80%, 100% {
       opacity: 0;
-      transform: translate(-50%, 0);
+      transform: translate(-50%, 0) scale(0.65);
     }
-    25%, 66% {
+    23%, 67% {
       opacity: 1;
-      transform: translate(-50%, 24px);
+      transform: translate(-50%, 10px) scale(1);
     }
-    33%, 74% {
-      opacity: 0;
-      transform: translate(-50%, 82px);
+    31%, 75% {
+      opacity: 0.18;
+      transform: translate(-50%, 76px) scale(0.72);
     }
   }
   @keyframes chamberLiquid {
