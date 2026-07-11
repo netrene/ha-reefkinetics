@@ -366,11 +366,14 @@ function alarmClass(model) {
 
 function renderTests(model) {
   const tests = model.tests.length ? model.tests : model.configuredTests;
+  const testStartLocked = isTestStartLocked(model);
   const cards = tests.slice(0, 5).map((test) => {
     const button = test.button;
+    const disabled = !button || testStartLocked ? "disabled" : "";
+    const title = testStartLocked ? "ReefBot is busy" : "Start test";
     return `
       <article class="test-card" ${test.entityId ? `data-more-info="${test.entityId}"` : ""} title="Open history">
-        <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : "disabled"} title="Start test">
+        <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : ""} ${disabled} title="${title}">
           <ha-icon icon="mdi:play"></ha-icon>
         </button>
         <div class="test-main">
@@ -391,6 +394,10 @@ function renderTests(model) {
       <div class="test-grid">${cards || `<div class="empty compact">No test entities found yet.</div>`}</div>
     </section>
   `;
+}
+
+function isTestStartLocked(model) {
+  return isChamberActive(model) || (numberValue(model.pending?.state) || 0) > 0;
 }
 
 function renderMachine(model) {
@@ -1577,7 +1584,7 @@ const styles = `
     margin: 0 auto 8px;
     border-radius: 10px 10px 22px 22px;
     border: 2px solid rgba(225,235,238,0.34);
-    overflow: hidden;
+    overflow: visible;
     background:
       linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.04) 34%, rgba(255,255,255,0.12)),
       rgba(8, 12, 14, 0.74);
@@ -1586,12 +1593,32 @@ const styles = `
       inset 0 0 22px rgba(0,0,0,0.46),
       0 12px 25px rgba(0,0,0,0.34);
   }
+  .chamber-vial::before {
+    content: "";
+    position: absolute;
+    left: -58px;
+    right: -58px;
+    top: 80px;
+    height: 6px;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle, rgba(255,255,255,0.98), rgba(130,235,255,0.78) 28%, transparent 58%),
+      linear-gradient(90deg, transparent, rgba(128,232,255,0.9), rgba(255,255,255,0.96), rgba(128,232,255,0.9), transparent);
+    filter: drop-shadow(0 0 10px rgba(120, 229, 255, 0.95));
+    opacity: 0;
+    pointer-events: none;
+    z-index: 6;
+  }
+  .chamber-vial.active::before {
+    animation: measurementFlash 3.2s ease-in-out infinite;
+  }
   .chamber-vial i {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
     height: 45%;
+    border-radius: 0 0 18px 18px;
     background: linear-gradient(180deg, rgba(135, 222, 241, 0.94), #1289a6);
   }
   .chamber-vial.active i {
@@ -2007,6 +2034,20 @@ const styles = `
   @keyframes sensorFlash {
     0%, 18%, 100% { opacity: 0; transform: translateX(0); }
     24%, 32% { opacity: 1; transform: translateX(12px); }
+  }
+  @keyframes measurementFlash {
+    0%, 17%, 36%, 100% {
+      opacity: 0;
+      transform: scaleX(0.35);
+    }
+    21%, 26% {
+      opacity: 1;
+      transform: scaleX(1);
+    }
+    30% {
+      opacity: 0.25;
+      transform: scaleX(1.12);
+    }
   }
 
   @media (max-width: 1350px) {
