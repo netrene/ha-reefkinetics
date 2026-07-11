@@ -535,16 +535,23 @@ function renderTests(model) {
     const button = test.button;
     const disabled = !button || testStartLocked ? "disabled" : "";
     const title = testStartLocked ? "ReefBot is busy" : "Start test";
+    const trend = testTrendSummary(test.history, test.unit);
     return `
       <article class="test-card" ${test.entityId ? `data-more-info="${test.entityId}"` : ""} title="Open history">
-        <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : ""} ${disabled} title="${title}">
-          <ha-icon icon="mdi:play"></ha-icon>
-        </button>
-        <div class="test-main">
-          <strong>${escapeHtml(test.name)}</strong>
-          <span>${escapeHtml(formatReading(test.value, test.unit))}</span>
+        <div class="test-card-head">
+          <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : ""} ${disabled} title="${title}">
+            <ha-icon icon="mdi:play"></ha-icon>
+          </button>
+          <div class="test-main">
+            <strong>${escapeHtml(test.name)}</strong>
+            <span>${escapeHtml(trend.label)}</span>
+          </div>
+          <div class="test-reading">
+            <b>${escapeHtml(formatReading(test.value, test.unit))}</b>
+            ${trend.delta ? `<small class="${trend.deltaClass}">${escapeHtml(trend.delta)}</small>` : ""}
+          </div>
         </div>
-        ${sparkline(test.history, test.unit)}
+        ${resultTrend(test.history)}
       </article>
     `;
   }).join("");
@@ -1058,26 +1065,61 @@ function extractHistory(state) {
     .reverse();
 }
 
-function sparkline(values = [], unit = "") {
+function testTrendSummary(values = [], unit = "") {
+  const recent = values.filter((value) => typeof value === "number").slice(-2);
+  if (recent.length < 2) {
+    return {
+      label: "Latest result",
+      delta: "",
+      deltaClass: "",
+    };
+  }
+  const delta = recent[recent.length - 1] - recent[recent.length - 2];
+  const sign = delta > 0 ? "+" : "";
+  return {
+    label: "Last change",
+    delta: `${sign}${formatNumber(delta)} ${unit || ""}`.trim(),
+    deltaClass: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
+  };
+}
+
+function resultTrend(values = []) {
   if (!values.length) {
-    return `<svg class="spark" viewBox="0 0 80 28"><path d="M2 21 L78 21"></path></svg>`;
+    return `
+      <div class="result-trend empty-trend">
+        <svg class="spark" viewBox="0 0 180 52" aria-hidden="true"><path d="M12 28 L168 28"></path></svg>
+        <div class="trend-values"><span>-</span><span>-</span><span>-</span></div>
+      </div>
+    `;
   }
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
   const points = values.map((value, index) => {
-    const x = 2 + (index / Math.max(values.length - 1, 1)) * 76;
-    const y = 24 - ((value - min) / range) * 20;
+    const x = 8 + (index / Math.max(values.length - 1, 1)) * 164;
+    const y = 42 - ((value - min) / range) * 30;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   const recent = values.slice(-3);
-  const labels = recent
+  const paddedRecent = [...Array(Math.max(0, 3 - recent.length)).fill(undefined), ...recent];
+  const labels = paddedRecent
     .map((value) => `<span>${escapeHtml(formatNumber(value))}</span>`)
     .join("");
+  const dotIndexes = recent.map((_, index) => values.length - recent.length + index);
+  const dots = dotIndexes.map((valueIndex) => {
+    const value = values[valueIndex];
+    const x = 8 + (valueIndex / Math.max(values.length - 1, 1)) * 164;
+    const y = 42 - ((value - min) / range) * 30;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2"></circle>`;
+  }).join("");
   return `
-    <div class="spark-wrap">
-      <svg class="spark" viewBox="0 0 80 28"><polyline points="${points}"></polyline></svg>
-      <div class="spark-values">${labels}</div>
+    <div class="result-trend">
+      <svg class="spark" viewBox="0 0 180 52" aria-hidden="true">
+        <path d="M8 42 L172 42"></path>
+        <polyline points="${points}"></polyline>
+        <g>${dots}</g>
+      </svg>
+      <div class="trend-values">${labels}</div>
     </div>
   `;
 }
@@ -1472,16 +1514,24 @@ const styles = `
   }
   .test-card {
     display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto;
-    gap: 8px 10px;
-    align-items: center;
-    min-height: 104px;
+    grid-template-rows: auto 1fr;
+    gap: 12px;
+    min-height: 118px;
     padding: 12px;
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.045);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028)),
+      rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.06);
     cursor: pointer;
+    min-width: 0;
+  }
+  .test-card-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
   }
   .play {
     width: 34px;
@@ -1503,24 +1553,56 @@ const styles = `
     color: #b9c6cb;
     margin-top: 3px;
   }
+  .test-reading {
+    justify-self: end;
+    min-width: 76px;
+    max-width: 108px;
+    text-align: right;
+  }
+  .test-reading b {
+    display: block;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(79, 210, 242, 0.12);
+    border: 1px solid rgba(79, 210, 242, 0.22);
+    color: #edf9fb;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .test-reading small {
+    display: block;
+    margin-top: 5px;
+    color: #b9c6cb;
+    font-size: 11px;
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .test-reading small.up { color: #8ee69c; }
+  .test-reading small.down { color: #ff9a8f; }
+  .test-reading small.flat { color: #b9c6cb; }
   .spark {
     width: 100%;
-    height: 28px;
+    height: 52px;
   }
-  .spark-wrap {
-    grid-column: 1 / -1;
+  .result-trend {
     min-width: 0;
   }
-  .spark-values {
+  .trend-values {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 4px;
-    margin-top: 2px;
+    gap: 6px;
+    margin-top: -3px;
     color: #b8c7cc;
-    font-size: 10px;
+    font-size: 11px;
     line-height: 1;
   }
-  .spark-values span {
+  .trend-values span {
     min-width: 0;
     overflow: hidden;
     text-align: center;
@@ -1530,10 +1612,19 @@ const styles = `
   .spark path, .spark polyline {
     fill: none;
     stroke: #4fd2f2;
-    stroke-width: 2;
+    stroke-width: 2.8;
     stroke-linecap: round;
     stroke-linejoin: round;
     opacity: 0.9;
+  }
+  .spark path {
+    stroke: rgba(185, 198, 203, 0.2);
+    stroke-width: 1.2;
+  }
+  .spark circle {
+    fill: #1d2b2f;
+    stroke: #4fd2f2;
+    stroke-width: 2.2;
   }
 
   .machine {
@@ -2364,6 +2455,24 @@ const styles = `
   }
 
   @media (max-width: 480px) {
+    .test-card-head {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    .test-reading {
+      grid-column: 2;
+      justify-self: start;
+      max-width: 100%;
+      text-align: left;
+    }
+    .test-reading b,
+    .test-reading small {
+      display: inline-block;
+      max-width: 100%;
+      vertical-align: middle;
+    }
+    .test-reading small {
+      margin: 6px 0 0;
+    }
     .machine-frame {
       width: 880px;
       min-width: 880px;
