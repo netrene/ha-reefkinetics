@@ -345,8 +345,8 @@ function buildModel(hass, lastPressed) {
     alarmLogs: findReefBotByName(states, ["alarm logs", "alarm log", "alarm history", "alarmhistorie", "alarme"]),
     safeMargins: findReefBotByName(states, ["safe margins", "sicherheitsbereiche"]),
     configuredTestsSummary: findReefBotByName(states, ["configured tests", "konfigurierte tests"]),
-    lastUpdate: findByName(states, ["last update", "letzte aktualisierung"]),
-    lastSuccessfulTest: findByName(states, ["last successful test", "letzter erfolgreicher test"]),
+    lastUpdate: findReefBotByName(states, ["last update", "letzte aktualisierung"]),
+    lastSuccessfulTest: findReefBotByName(states, ["last successful test", "letzter erfolgreicher test"]),
   };
 }
 
@@ -922,13 +922,12 @@ function componentModel(states, key, terms) {
 }
 
 function findOnline(states) {
-  return states.find((state) => state.entity_id.startsWith("binary_sensor.") && entityName(state).toLowerCase().includes("online"));
-}
-
-function findByName(states, terms) {
   return states.find((state) => {
+    if (!state.entity_id.startsWith("binary_sensor.")) return false;
+    if (!isReefBotEntity(state)) return false;
     const name = entityName(state).toLowerCase();
-    return terms.some((term) => name.includes(term));
+    const entity = state.entity_id.toLowerCase();
+    return name.includes("online") || entity.includes("online");
   });
 }
 
