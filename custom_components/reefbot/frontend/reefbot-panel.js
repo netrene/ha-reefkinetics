@@ -104,7 +104,7 @@ class ReefBotPanel extends HTMLElement {
     if (!entityId || !this._hass) return;
     const name = button.dataset.label || entityName(this._hass.states[entityId]) || entityId;
     const kind = button.dataset.kind;
-    if (kind === "test") {
+    if (kind === "test" || kind === "refill") {
       this._confirmAction = { entityId, name, kind };
       this.render();
       return;
@@ -412,14 +412,20 @@ function alarmClass(model) {
 
 function renderConfirmDialog(action) {
   if (!action) return "";
+  const isRefill = action.kind === "refill";
+  const title = isRefill ? "Füllstand zurücksetzen?" : "Test starten?";
+  const message = isRefill
+    ? `ReefBot setzt <strong>${escapeHtml(action.name)}</strong> auf voll. Bitte nur bestätigen, wenn das Röhrchen wirklich aufgefüllt wurde.`
+    : `ReefBot startet den Test <strong>${escapeHtml(action.name)}</strong>. Währenddessen sollten keine weiteren Tests gestartet werden.`;
+  const buttonLabel = isRefill ? "Refill bestätigen" : "Test starten";
   return `
     <div class="dialog-backdrop" data-dialog-close>
-      <section class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="confirm-test-title" data-dialog-card>
-        <h2 id="confirm-test-title">Test starten?</h2>
-        <p>ReefBot startet den Test <strong>${escapeHtml(action.name)}</strong>. Währenddessen sollten keine weiteren Tests gestartet werden.</p>
+      <section class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="confirm-action-title" data-dialog-card>
+        <h2 id="confirm-action-title">${escapeHtml(title)}</h2>
+        <p>${message}</p>
         <div class="dialog-actions">
           <button class="ghost" data-dialog-close>Abbrechen</button>
-          <button class="primary" data-confirm-start>Test starten</button>
+          <button class="primary ${isRefill ? "danger" : ""}" data-confirm-start>${escapeHtml(buttonLabel)}</button>
         </div>
       </section>
     </div>
@@ -632,16 +638,17 @@ function renderChamberVial(model) {
 function renderVial(tube) {
   const height = clamp(tube.percentage * 0.86, 4, 86);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
+  const refillLabel = `Refill Tube ${tube.number}: ${tube.shortName}`;
   return `
     <article class="vial-card">
-      <button class="mini-reset" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-label="Refill Tube ${tube.number}"` : "disabled"} title="Refill tube">
-        <ha-icon icon="mdi:restore"></ha-icon>
-      </button>
       <div class="vial-cap"></div>
       <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
         <span>${escapeHtml(label)}</span>
         <em>20 mL</em>
         <i></i>
+        <button class="vial-refill" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"} title="Refill tube">
+          <ha-icon icon="mdi:restore"></ha-icon>
+        </button>
       </div>
       <strong class="vial-number">${tube.number}</strong>
       <p>${escapeHtml(tube.shortName)}</p>
@@ -1356,6 +1363,11 @@ const styles = `
     border: 1px solid rgba(255,255,255,0.2);
     font-weight: 800;
   }
+  .dialog-actions .primary.danger {
+    color: #fff;
+    background: #b73535;
+    border-color: rgba(255, 170, 170, 0.34);
+  }
   .alarm-dialog {
     width: min(620px, 100%);
   }
@@ -1496,7 +1508,7 @@ const styles = `
     font-weight: 700;
   }
   .section-title.small h2 { font-size: 16px; }
-  .section-title button, .mini-reset {
+  .section-title button {
     background: rgba(0, 173, 217, 0.16);
     color: #66d7f7;
     border: 1px solid rgba(102, 215, 247, 0.28);
@@ -1826,14 +1838,6 @@ const styles = `
     text-align: center;
     min-width: 0;
   }
-  .mini-reset {
-    width: 30px;
-    height: 26px;
-    display: inline-grid;
-    place-items: center;
-    padding: 0;
-    margin-bottom: 9px;
-  }
   .vial-cap {
     width: min(44px, 72%);
     height: 24px;
@@ -1910,6 +1914,26 @@ const styles = `
     font-size: 11px;
     color: #fff;
     text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  }
+  .vial-refill {
+    position: absolute;
+    right: 4px;
+    bottom: 5px;
+    z-index: 4;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 7px;
+    color: #ffe8e8;
+    background: rgba(183, 53, 53, 0.9);
+    border: 1px solid rgba(255, 185, 185, 0.42);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.38), 0 0 12px rgba(183,53,53,0.3);
+  }
+  .vial-refill ha-icon {
+    width: 17px;
+    height: 17px;
   }
   .vial-card strong {
     display: block;
