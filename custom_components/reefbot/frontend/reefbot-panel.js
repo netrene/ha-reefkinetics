@@ -1917,8 +1917,8 @@ const styles = `
   }
   .vial-refill {
     position: absolute;
-    right: 4px;
-    bottom: 5px;
+    left: 50%;
+    bottom: 12px;
     z-index: 4;
     width: 24px;
     height: 24px;
@@ -1930,6 +1930,7 @@ const styles = `
     background: rgba(183, 53, 53, 0.9);
     border: 1px solid rgba(255, 185, 185, 0.42);
     box-shadow: 0 4px 10px rgba(0,0,0,0.38), 0 0 12px rgba(183,53,53,0.3);
+    transform: translateX(-50%);
   }
   .vial-refill ha-icon {
     width: 17px;

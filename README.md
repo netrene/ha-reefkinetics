@@ -76,6 +76,10 @@ The integration registers a `ReefBot` sidebar panel in Home Assistant. The panel
 
 The panel does not call the Reef Kinetics cloud directly. It only reads Home Assistant entity states and presses the existing Home Assistant button entities.
 
+## Project Handoff
+
+See [handoff.md](handoff.md) for a deeper technical handoff covering login, device and tank discovery, available Reef Kinetics cloud endpoints, entity mapping, write actions, panel architecture, and notes for future native Android/iOS app development.
+
 ## Known API Endpoints
 
 - `POST /api/APIService/GetUserDevices`
