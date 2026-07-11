@@ -6,6 +6,8 @@ class ReefBotPanel extends HTMLElement {
     this._lastRender = 0;
     this._narrow = false;
     this._lastPressed = undefined;
+    this._confirmAction = undefined;
+    this._activeDialog = undefined;
   }
 
   set hass(hass) {
@@ -62,6 +64,8 @@ class ReefBotPanel extends HTMLElement {
             </section>
           </section>
         </section>
+        ${renderConfirmDialog(this._confirmAction)}
+        ${renderAlarmDialog(model, this._activeDialog === "alarms")}
       </main>
     `;
 
@@ -77,6 +81,21 @@ class ReefBotPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-menu]").forEach((button) => {
       button.addEventListener("click", () => this.toggleMenu());
     });
+    this.shadowRoot.querySelectorAll("[data-dialog]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._activeDialog = button.dataset.dialog;
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-dialog-card]").forEach((card) => {
+      card.addEventListener("click", (event) => event.stopPropagation());
+    });
+    this.shadowRoot.querySelectorAll("[data-dialog-close]").forEach((button) => {
+      button.addEventListener("click", () => this.closeDialog());
+    });
+    this.shadowRoot.querySelectorAll("[data-confirm-start]").forEach((button) => {
+      button.addEventListener("click", () => this.confirmPendingAction());
+    });
     this.updateMenuButton();
   }
 
@@ -84,17 +103,42 @@ class ReefBotPanel extends HTMLElement {
     const entityId = button?.dataset?.press;
     if (!entityId || !this._hass) return;
     const name = button.dataset.label || entityName(this._hass.states[entityId]) || entityId;
-    this._lastPressed = button.dataset.kind === "test"
+    const kind = button.dataset.kind;
+    if (kind === "test") {
+      this._confirmAction = { entityId, name, kind };
+      this.render();
+      return;
+    }
+    this.executeButtonPress({ entityId, name, kind });
+  }
+
+  executeButtonPress(action) {
+    const { entityId, name, kind } = action || {};
+    if (!entityId || !this._hass) return;
+    this._lastPressed = kind === "test"
       ? {
         entityId,
         name,
         time: Date.now(),
-        kind: "test",
+        kind,
       }
       : undefined;
+    this._confirmAction = undefined;
     this.render();
     this._hass.callService("button", "press", { entity_id: entityId });
     this.refreshReefBotEntities();
+  }
+
+  confirmPendingAction() {
+    const action = this._confirmAction;
+    this._confirmAction = undefined;
+    this.executeButtonPress(action);
+  }
+
+  closeDialog() {
+    this._confirmAction = undefined;
+    this._activeDialog = undefined;
+    this.render();
   }
 
   showMoreInfo(entityId) {
@@ -298,7 +342,7 @@ function buildModel(hass, lastPressed) {
     recentOperation: recentOperationFromHistory(findPendingOperationsSensor(states), configuredTests),
     lastPressed,
     notifications: findReefBotByName(states, ["notifications"]),
-    alarmLogs: findReefBotByName(states, ["alarm logs", "alarm log", "alarme"]),
+    alarmLogs: findReefBotByName(states, ["alarm logs", "alarm log", "alarm history", "alarmhistorie", "alarme"]),
     safeMargins: findReefBotByName(states, ["safe margins", "sicherheitsbereiche"]),
     configuredTestsSummary: findReefBotByName(states, ["configured tests", "konfigurierte tests"]),
     lastUpdate: findByName(states, ["last update", "letzte aktualisierung"]),
@@ -326,15 +370,15 @@ function renderHeader(model) {
         ${headerChip("Status", onlineText, online?.entity_id, onlineClass)}
         ${headerChip("Pending operation", pendingOperationLabel(model), model.currentOperation?.entity_id)}
         ${headerChip("Last operation", lastOperationLabel(model), model.currentOperation?.entity_id)}
-        ${headerChip("Alarms", alarmSummary(model), model.alarmLogs?.entity_id || model.safeMargins?.entity_id, alarmClass(model))}
+        ${headerChip("Alarms", alarmSummary(model), model.alarmLogs?.entity_id, alarmClass(model), "alarms")}
       </div>
     </header>
   `;
 }
 
-function headerChip(label, value, entityId, valueClass = "") {
+function headerChip(label, value, entityId, valueClass = "", dialog = "") {
   return `
-    <div class="header-chip" ${entityId ? `data-more-info="${entityId}"` : ""}>
+    <div class="header-chip" ${dialog ? `data-dialog="${dialog}"` : entityId ? `data-more-info="${entityId}"` : ""}>
       <b class="${valueClass}">${escapeHtml(value ?? "-")}</b>
       <span>${escapeHtml(label)}</span>
     </div>
@@ -362,6 +406,73 @@ function alarmSummary(model) {
 function alarmClass(model) {
   const logs = numberValue(model.alarmLogs?.state);
   return logs && logs > 0 ? "warn" : "";
+}
+
+function renderConfirmDialog(action) {
+  if (!action) return "";
+  return `
+    <div class="dialog-backdrop" data-dialog-close>
+      <section class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="confirm-test-title" data-dialog-card>
+        <h2 id="confirm-test-title">Test starten?</h2>
+        <p>ReefBot startet den Test <strong>${escapeHtml(action.name)}</strong>. Währenddessen sollten keine weiteren Tests gestartet werden.</p>
+        <div class="dialog-actions">
+          <button class="ghost" data-dialog-close>Abbrechen</button>
+          <button class="primary" data-confirm-start>Test starten</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderAlarmDialog(model, open) {
+  if (!open) return "";
+  const logs = alarmRows(model);
+  const rows = logs.length
+    ? logs.map((log) => `
+      <li>
+        <b>${escapeHtml(log.parameter || log.message || "Alarm")}</b>
+        <span>${escapeHtml(formatAlarmDate(log.date))}</span>
+        <small>${escapeHtml(alarmDetail(log))}</small>
+      </li>
+    `).join("")
+    : `<li class="empty-row">Keine Alarmereignisse in der Integration gefunden.</li>`;
+  return `
+    <div class="dialog-backdrop" data-dialog-close>
+      <section class="dialog-card alarm-dialog" role="dialog" aria-modal="true" aria-labelledby="alarm-log-title" data-dialog-card>
+        <h2 id="alarm-log-title">Alarmhistorie</h2>
+        <p>Die letzten von Reef Kinetics gelieferten Alarmereignisse.</p>
+        <ul class="alarm-list">${rows}</ul>
+        <div class="dialog-actions">
+          ${model.alarmLogs?.entity_id ? `<button class="ghost" data-more-info="${model.alarmLogs.entity_id}">HA-Verlauf</button>` : ""}
+          <button class="primary" data-dialog-close>Schließen</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function alarmRows(model) {
+  const logs = model.alarmLogs?.attributes?.logs;
+  return Array.isArray(logs) ? logs.filter((log) => log && typeof log === "object") : [];
+}
+
+function alarmDetail(log) {
+  const details = [
+    log.message,
+    log.value !== undefined && log.value !== null ? `Value: ${log.value}` : undefined,
+    log.status ? `Status: ${log.status}` : undefined,
+  ].filter(activeState);
+  return details.join(" · ") || "Keine weiteren Details";
+}
+
+function formatAlarmDate(value) {
+  if (!activeState(value)) return "Zeitpunkt unbekannt";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return String(value);
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(parsed));
 }
 
 function renderTests(model) {
@@ -1095,6 +1206,99 @@ const styles = `
   button[disabled] {
     cursor: not-allowed;
     opacity: 0.45;
+  }
+
+  .dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, 0.56);
+    backdrop-filter: blur(5px);
+  }
+  .dialog-card {
+    width: min(460px, 100%);
+    max-height: min(74vh, 620px);
+    overflow: auto;
+    border-radius: 14px;
+    padding: 22px;
+    color: #edf7fa;
+    background:
+      linear-gradient(180deg, rgba(28, 39, 43, 0.98), rgba(12, 20, 23, 0.98));
+    border: 1px solid rgba(122, 221, 247, 0.22);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.56);
+  }
+  .dialog-card h2 {
+    margin: 0 0 10px;
+    font-size: 24px;
+  }
+  .dialog-card p {
+    margin: 0 0 18px;
+    color: #aebec5;
+    line-height: 1.45;
+  }
+  .dialog-card strong {
+    color: #fff;
+  }
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  .dialog-actions button {
+    min-height: 38px;
+    padding: 0 16px;
+  }
+  .dialog-actions .ghost {
+    color: #9edff0;
+    background: rgba(18, 42, 50, 0.72);
+    border: 1px solid rgba(102, 215, 247, 0.24);
+  }
+  .dialog-actions .primary {
+    color: #051014;
+    background: #66d7f7;
+    border: 1px solid rgba(255,255,255,0.2);
+    font-weight: 800;
+  }
+  .alarm-dialog {
+    width: min(620px, 100%);
+  }
+  .alarm-list {
+    list-style: none;
+    margin: 0 0 18px;
+    padding: 0;
+    display: grid;
+    gap: 9px;
+  }
+  .alarm-list li {
+    padding: 11px 12px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.045);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .alarm-list b,
+  .alarm-list span,
+  .alarm-list small {
+    display: block;
+  }
+  .alarm-list b {
+    color: #fff;
+    font-size: 14px;
+  }
+  .alarm-list span {
+    margin-top: 3px;
+    color: #8fdcf0;
+    font-size: 12px;
+  }
+  .alarm-list small {
+    margin-top: 5px;
+    color: #b7c7cd;
+    line-height: 1.35;
+  }
+  .alarm-list .empty-row {
+    color: #aebec5;
   }
 
   .page {
