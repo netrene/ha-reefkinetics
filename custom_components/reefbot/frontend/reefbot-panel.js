@@ -370,7 +370,7 @@ function renderHeader(model) {
         ${headerChip("Status", onlineText, online?.entity_id, onlineClass)}
         ${headerChip("Pending operation", pendingOperationLabel(model), model.currentOperation?.entity_id)}
         ${headerChip("Last operation", lastOperationLabel(model), model.currentOperation?.entity_id)}
-        ${headerChip("Alarms", alarmSummary(model), model.alarmLogs?.entity_id, alarmClass(model), "alarms")}
+        ${headerChip("Alarms & status", alarmSummary(model), model.alarmLogs?.entity_id || model.notifications?.entity_id, alarmClass(model), "alarms")}
       </div>
     </header>
   `;
@@ -399,13 +399,15 @@ function lastOperationLabel(model) {
 
 function alarmSummary(model) {
   const logs = numberValue(model.alarmLogs?.state);
-  if (logs === undefined) return "-";
-  return logs === 0 ? "0 alarms" : `${logs} alarms`;
+  const notifications = notificationRows(model).length;
+  const count = (logs || 0) + notifications;
+  if (logs === undefined && !notifications) return "-";
+  return count === 0 ? "0 Meldungen" : `${count} Meldungen`;
 }
 
 function alarmClass(model) {
   const logs = numberValue(model.alarmLogs?.state);
-  return logs && logs > 0 ? "warn" : "";
+  return (logs && logs > 0) || notificationRows(model).some((row) => row.alert) ? "warn" : "";
 }
 
 function renderConfirmDialog(action) {
@@ -426,24 +428,33 @@ function renderConfirmDialog(action) {
 
 function renderAlarmDialog(model, open) {
   if (!open) return "";
-  const logs = alarmRows(model);
-  const rows = logs.length
-    ? logs.map((log) => `
+  const logs = alarmRows(model).map((log) => ({
+    title: log.parameter || log.message || "Alarm",
+    date: log.date,
+    detail: alarmDetail(log),
+    type: "Alarm",
+    alert: true,
+  }));
+  const notifications = notificationRows(model);
+  const rows = [...logs, ...notifications];
+  const renderedRows = rows.length
+    ? rows.map((row) => `
       <li>
-        <b>${escapeHtml(log.parameter || log.message || "Alarm")}</b>
-        <span>${escapeHtml(formatAlarmDate(log.date))}</span>
-        <small>${escapeHtml(alarmDetail(log))}</small>
+        <b>${escapeHtml(row.title)}</b>
+        <span>${escapeHtml([row.type, formatAlarmDate(row.date)].filter(activeState).join(" · "))}</span>
+        <small>${escapeHtml(row.detail)}</small>
       </li>
     `).join("")
-    : `<li class="empty-row">Keine Alarmereignisse in der Integration gefunden.</li>`;
+    : `<li class="empty-row">Keine Alarm- oder Statusmeldungen in der Integration gefunden.</li>`;
   return `
     <div class="dialog-backdrop" data-dialog-close>
       <section class="dialog-card alarm-dialog" role="dialog" aria-modal="true" aria-labelledby="alarm-log-title" data-dialog-card>
-        <h2 id="alarm-log-title">Alarmhistorie</h2>
-        <p>Die letzten von Reef Kinetics gelieferten Alarmereignisse.</p>
-        <ul class="alarm-list">${rows}</ul>
+        <h2 id="alarm-log-title">Alarme & Status</h2>
+        <p>Alarmhistorie und die letzten von Reef Kinetics gelieferten Statusmeldungen.</p>
+        <ul class="alarm-list">${renderedRows}</ul>
         <div class="dialog-actions">
-          ${model.alarmLogs?.entity_id ? `<button class="ghost" data-more-info="${model.alarmLogs.entity_id}">HA-Verlauf</button>` : ""}
+          ${model.notifications?.entity_id ? `<button class="ghost" data-more-info="${model.notifications.entity_id}">Status-Verlauf</button>` : ""}
+          ${model.alarmLogs?.entity_id ? `<button class="ghost" data-more-info="${model.alarmLogs.entity_id}">Alarm-Verlauf</button>` : ""}
           <button class="primary" data-dialog-close>Schließen</button>
         </div>
       </section>
@@ -454,6 +465,39 @@ function renderAlarmDialog(model, open) {
 function alarmRows(model) {
   const logs = model.alarmLogs?.attributes?.logs;
   return Array.isArray(logs) ? logs.filter((log) => log && typeof log === "object") : [];
+}
+
+function notificationRows(model) {
+  const notifications = model.notifications?.attributes?.notifications;
+  if (!Array.isArray(notifications)) return [];
+  return notifications
+    .filter((item) => item && typeof item === "object")
+    .slice(0, 10)
+    .map((item) => {
+      const parsed = parseNotificationMessage(item.message);
+      const title = item.title || parsed.title || (parsed.alert ? "Alarm" : "Statusmeldung");
+      return {
+        title,
+        date: item.date || parsed.date,
+        detail: parsed.detail || item.message || "Keine weiteren Details",
+        type: parsed.alert ? "Alarm" : "Status",
+        alert: parsed.alert,
+      };
+    });
+}
+
+function parseNotificationMessage(message) {
+  const text = String(message || "").trim();
+  const parts = text.split("|").map((part) => part.trim()).filter(Boolean);
+  const date = parts.find((part) => !Number.isNaN(Date.parse(part)));
+  const messageText = parts.find((part) => !["not read", "read"].includes(part.toLowerCase()) && part !== date) || text;
+  const alert = /alert|alarm|threshold|warning|error|empty|waste/i.test(messageText);
+  return {
+    title: alert ? "Alarm" : "Statusmeldung",
+    detail: messageText,
+    date,
+    alert,
+  };
 }
 
 function alarmDetail(log) {

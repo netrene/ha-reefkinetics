@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+import re
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -1198,36 +1199,37 @@ def _normalize(value: str) -> str:
 
 def _notification_summary(item: dict[str, Any]) -> dict[str, Any]:
     """Return a compact notification row."""
+    message = _first_present(
+        item,
+        (
+            "Message",
+            "message",
+            "Body",
+            "body",
+            "Text",
+            "text",
+            "Description",
+            "description",
+            "NotificationMessage",
+            "notificationMessage",
+        ),
+    ) or _compact_string_values(item)
+    date = _first_present(
+        item,
+        (
+            "AddedDateString",
+            "addedDateString",
+            "CreatedDate",
+            "createdDate",
+            "Date",
+            "date",
+        ),
+    ) or _extract_iso_datetime(message)
     return {
         "id": _first_present(item, ("NotificationId", "notificationId", "Id", "id")),
         "title": _first_present(item, ("Title", "title", "Subject", "subject")),
-        "message": _first_present(
-            item,
-            (
-                "Message",
-                "message",
-                "Body",
-                "body",
-                "Text",
-                "text",
-                "Description",
-                "description",
-                "NotificationMessage",
-                "notificationMessage",
-            ),
-        )
-        or _compact_string_values(item),
-        "date": _first_present(
-            item,
-            (
-                "AddedDateString",
-                "addedDateString",
-                "CreatedDate",
-                "createdDate",
-                "Date",
-                "date",
-            ),
-        ),
+        "message": message,
+        "date": date,
         "read": _first_present(item, ("IsRead", "isRead", "Read", "read")),
         "type": _first_present(
             item, ("NotificationType", "notificationType", "Type", "type")
@@ -1378,6 +1380,17 @@ def _compact_string_values(item: dict[str, Any], limit: int = 4) -> str | None:
         if len(values) >= limit:
             break
     return " | ".join(values) if values else None
+
+
+def _extract_iso_datetime(value: Any) -> str | None:
+    """Extract an ISO timestamp embedded in Reef Kinetics notification text."""
+    if not isinstance(value, str):
+        return None
+    match = re.search(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?",
+        value,
+    )
+    return match.group(0) if match else None
 
 
 def _latest_device_result_for_operation(
