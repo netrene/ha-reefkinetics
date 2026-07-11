@@ -19,6 +19,7 @@ Eine native Mobile-App kann dieses Prinzip weiterfuehren und muss nicht die frag
 ## Repository
 
 - Repo: `netrene/ha-reefkinetics`
+- GitHub: `https://github.com/netrene/ha-reefkinetics`
 - Lokaler Pfad: `/Users/renezuch/Documents/Codex/ha-reefkinetics`
 - Home Assistant Domain: `reefbot`
 - Aktuelle Version: siehe `custom_components/reefbot/manifest.json`
@@ -45,6 +46,11 @@ Lokale, nicht versionierte Details zum aktuell analysierten Account liegen in
 `handoff.local.md`. Diese Datei enthaelt reale Account-/Device-IDs und ist
 lokal ueber `.git/info/exclude` von Git ausgeschlossen. Sie darf nicht in das
 oeffentliche Repo uebernommen werden.
+
+Fuer eine neue App-Entwicklungssession gibt es zusaetzlich
+`app-development-handoff.local.md`. Diese Datei ist ebenfalls lokal ignoriert
+und enthaelt den vollstaendigeren Startkontext inkl. lokal gefundener
+Zugangsdaten/Tokens, API-Flows und UI-Zielbild.
 
 Sensible Felder:
 
