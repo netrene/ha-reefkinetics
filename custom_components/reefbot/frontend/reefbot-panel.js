@@ -2173,11 +2173,13 @@ const styles = `
   .vial-card .vial-name {
     position: relative;
     display: grid;
-    grid-template-columns: 24px minmax(0, 1fr);
-    gap: 7px;
-    align-items: center;
+    grid-template-columns: 1fr;
+    grid-template-rows: 24px auto;
+    gap: 6px;
+    justify-items: center;
+    align-items: start;
     margin-top: 22px;
-    padding: 7px;
+    padding: 7px 6px 8px;
     color: #edf7fa;
     font-size: 12px;
     line-height: 1.25;
@@ -2185,7 +2187,10 @@ const styles = `
   }
   .vial-card .vial-label {
     display: block;
-    overflow-wrap: anywhere;
+    width: 100%;
+    text-align: center;
+    overflow-wrap: break-word;
+    word-break: normal;
     white-space: normal;
   }
   .chamber-slot small {
