@@ -280,12 +280,13 @@ function buildModel(hass, lastPressed) {
       method: state.attributes.method,
       chemicals: Array.isArray(state.attributes.chemicals) ? state.attributes.chemicals : [],
       latest: state.attributes.latest_result,
+      operationId: state.attributes.available_operation_id,
       button: findTestButton(states, [
         state.attributes.display_name,
         state.attributes.operation_name,
         state.attributes.method,
         state.state,
-      ]),
+      ], state.attributes.available_operation_id),
     }));
 
   const tubes = states
@@ -303,7 +304,7 @@ function buildModel(hass, lastPressed) {
         percentage: clamp(numberValue(state.attributes.fill_percentage) ?? percent(state.attributes.current_volume ?? state.state, state.attributes.capacity ?? 20), 0, 100),
         unit: state.attributes.unit || state.attributes.unit_of_measurement || "mL",
         color: chemicalColor(state.attributes.chemical_display_name || state.attributes.friendly_name || "", number),
-        refillButton: findButton(states, [`tube ${number}: refill`, `refill tube ${number}`]),
+        refillButton: findTubeRefillButton(states, number),
       };
     });
 
@@ -312,16 +313,16 @@ function buildModel(hass, lastPressed) {
     .sort((a, b) => (a.attributes.parameter_name || a.attributes.friendly_name || "").localeCompare(b.attributes.parameter_name || b.attributes.friendly_name || ""))
     .slice(0, 6)
     .map((state) => {
-      const name = state.attributes.parameter_name || state.attributes.friendly_name || state.entity_id;
-      const configured = findConfiguredTestForParameter(configuredTests, name);
+      const parameterName = state.attributes.parameter_name || state.attributes.friendly_name || state.entity_id;
+      const configured = findConfiguredTestForParameter(configuredTests, parameterName);
       return {
         entityId: state.entity_id,
-        name,
+        name: configured?.name || parameterName,
         value: state.state,
         unit: state.attributes.unit_of_measurement || "",
         history: extractHistory(state),
         operationName: configured?.name,
-        button: configured?.button || findTestButton(states, [name]),
+        button: configured?.button || findTestButton(states, [parameterName]),
       };
     });
 
@@ -660,11 +661,13 @@ function renderVial(tube) {
         <em>20 mL</em>
         <i></i>
         <button class="vial-refill" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"} title="Refill tube">
-          <ha-icon icon="mdi:restore"></ha-icon>
+          <ha-icon icon="mdi:reload"></ha-icon>
         </button>
       </div>
-      <strong class="vial-number">${tube.number}</strong>
-      <p class="vial-name">${escapeHtml(tube.shortName)}</p>
+      <p class="vial-name">
+        <strong class="vial-number">${tube.number}</strong>
+        <span class="vial-label">${escapeHtml(tube.shortName)}</span>
+      </p>
     </article>
   `;
 }
@@ -939,8 +942,12 @@ function statusRow(label, value) {
 function componentModel(states, key, terms) {
   const sensor = states.find((state) => {
     if (!state.entity_id.startsWith("sensor.")) return false;
-    const name = entityName(state).toLowerCase();
-    return terms.some((term) => name === term || name.endsWith(` ${term}`) || name.includes(term));
+    if (!isReefBotEntity(state)) return false;
+    return entityMatchesAnyTerm(state, terms, [
+      state.attributes?.component_name,
+      state.attributes?.component_id,
+      state.attributes?.device_component_id,
+    ]);
   });
   if (!sensor) return undefined;
   const display = sensor.attributes.display_value || `${sensor.state} ${sensor.attributes.unit_of_measurement || sensor.attributes.unit || ""}`.trim();
@@ -949,12 +956,41 @@ function componentModel(states, key, terms) {
     sensor,
     display,
     percentage,
-    button: findButton(states, [`${key}:`, key]),
+    button: findComponentResetButton(states, key, sensor, terms),
     capacityNumber: findComponentCapacityNumber(states, key, sensor, terms),
   };
 }
 
+function findComponentResetButton(states, key, sensor, terms) {
+  const componentId = componentIdentifier(sensor);
+  const byId = states.find((state) => (
+    state.entity_id.startsWith("button.")
+    && isReefBotEntity(state)
+    && componentId
+    && componentIdentifier(state) === componentId
+  ));
+  if (byId) return byId;
+
+  return states.find((state) => (
+    state.entity_id.startsWith("button.")
+    && isReefBotEntity(state)
+    && entityMatchesAnyTerm(state, [`${key}:`, key, ...(terms || [])], [
+      state.attributes?.component_name,
+      state.attributes?.reset_title,
+    ])
+  ));
+}
+
 function findComponentCapacityNumber(states, key, sensor, terms) {
+  const componentId = componentIdentifier(sensor);
+  const byId = states.find((state) => (
+    state.entity_id.startsWith("number.")
+    && isReefBotEntity(state)
+    && componentId
+    && componentIdentifier(state) === componentId
+  ));
+  if (byId) return byId;
+
   const componentName = sensor?.attributes?.component_name;
   const searchTerms = [
     key,
@@ -976,6 +1012,11 @@ function findComponentCapacityNumber(states, key, sensor, terms) {
     if (!isCapacity) return false;
     return searchTerms.some((term) => name.includes(term) || entity.includes(term.replaceAll(" ", "_")));
   });
+}
+
+function componentIdentifier(state) {
+  const value = state?.attributes?.device_component_id ?? state?.attributes?.component_id;
+  return value === undefined || value === null ? undefined : String(value);
 }
 
 function findOnline(states) {
@@ -1030,8 +1071,45 @@ function findTimingSensor(states, suffix) {
 function findButton(states, terms) {
   return states.find((state) => {
     if (!state.entity_id.startsWith("button.")) return false;
-    const name = entityName(state).toLowerCase();
-    return terms.some((term) => name.includes(term.toLowerCase()));
+    if (!isReefBotEntity(state)) return false;
+    return entityMatchesAnyTerm(state, terms);
+  });
+}
+
+function findTubeRefillButton(states, tubeNumber) {
+  const number = Number(tubeNumber);
+  const byAttribute = states.find((state) => (
+    state.entity_id.startsWith("button.")
+    && isReefBotEntity(state)
+    && Number(state.attributes?.tube_number) === number
+  ));
+  if (byAttribute) return byAttribute;
+
+  const suffix = `refill_tube_${number}`;
+  const byEntityId = states.find((state) => (
+    state.entity_id.startsWith("button.")
+    && isReefBotEntity(state)
+    && state.entity_id.toLowerCase().includes(suffix)
+  ));
+  if (byEntityId) return byEntityId;
+
+  return findButton(states, [`tube ${number}: refill`, `refill tube ${number}`]);
+}
+
+function entityMatchesAnyTerm(state, terms, extraValues = []) {
+  const haystack = [
+    state.entity_id,
+    entityName(state),
+    ...extraValues,
+  ].filter(activeState);
+  const normalizedHaystack = haystack.map(normalize).filter(Boolean);
+  const textHaystack = haystack.map((value) => String(value).toLowerCase());
+
+  return (terms || []).filter(activeState).some((term) => {
+    const textTerm = String(term).toLowerCase();
+    const normalizedTerm = normalize(term);
+    return textHaystack.some((value) => value.includes(textTerm) || textTerm.includes(value))
+      || normalizedHaystack.some((value) => value.includes(normalizedTerm) || normalizedTerm.includes(value));
   });
 }
 
@@ -1043,12 +1121,28 @@ function isReefBotEntity(state) {
     || name.includes("reef bot");
 }
 
-function findTestButton(states, searchTerms) {
+function findTestButton(states, searchTerms, operationId) {
+  if (activeState(operationId)) {
+    const byOperationId = states.find((state) => (
+      state.entity_id.startsWith("button.")
+      && isReefBotEntity(state)
+      && String(state.attributes?.available_operation_id) === String(operationId)
+    ));
+    if (byOperationId) return byOperationId;
+  }
+
   const keys = searchTerms.flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
   return states.find((state) => {
     if (!state.entity_id.startsWith("button.")) return false;
-    const name = normalize(entityName(state));
-    return keys.some((key) => name.includes(key) || key.includes(name));
+    if (!isReefBotEntity(state)) return false;
+    const haystack = [
+      state.entity_id,
+      entityName(state),
+      state.attributes?.display_name,
+      state.attributes?.operation_name,
+      state.attributes?.parameter,
+    ].map(normalize).filter(Boolean);
+    return keys.some((key) => haystack.some((value) => value.includes(key) || key.includes(value)));
   });
 }
 
@@ -1571,7 +1665,7 @@ const styles = `
     display: grid;
     grid-template-rows: auto 1fr;
     gap: 12px;
-    min-height: 118px;
+    min-height: 132px;
     padding: 12px;
     border-radius: 8px;
     background:
@@ -1603,9 +1697,10 @@ const styles = `
   }
   .test-main strong {
     display: block;
-    white-space: nowrap;
+    line-height: 1.15;
+    white-space: normal;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
   }
   .test-main span {
     display: block;
@@ -1940,7 +2035,7 @@ const styles = `
   .vial-card {
     min-width: 0;
     display: grid;
-    grid-template-rows: 24px 150px 28px 44px auto;
+    grid-template-rows: 24px 150px auto;
     justify-items: center;
     align-items: start;
     text-align: center;
@@ -2038,11 +2133,13 @@ const styles = `
     background: rgba(183, 53, 53, 0.82);
     border: 1px solid rgba(255, 185, 185, 0.42);
     box-shadow: 0 4px 10px rgba(0,0,0,0.36), 0 0 10px rgba(183,53,53,0.22);
+    overflow: hidden;
     transform: translateX(-50%);
   }
   .vial-refill ha-icon {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
+    --mdc-icon-size: 15px;
   }
   .vial-card strong {
     display: block;
@@ -2054,7 +2151,7 @@ const styles = `
     place-items: center;
     width: 24px;
     height: 24px;
-    margin: 8px auto 10px;
+    margin: 0;
     border-radius: 50%;
     color: #dff7ff;
     font-size: 15px;
@@ -2066,21 +2163,30 @@ const styles = `
   .vial-card .vial-name,
   .chamber-operation {
     width: 100%;
-    min-height: 44px;
-    padding: 7px 6px;
+    min-height: 58px;
+    padding: 14px 7px 8px;
     border-radius: 8px;
     background: rgba(8, 18, 21, 0.78);
     border: 1px solid rgba(102, 215, 247, 0.14);
     box-shadow: 0 10px 22px rgba(0,0,0,0.22);
   }
   .vial-card .vial-name {
+    position: relative;
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 7px;
+    align-items: center;
+    margin-top: 22px;
+    padding: 7px;
     color: #edf7fa;
     font-size: 12px;
     line-height: 1.25;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    overflow: visible;
+  }
+  .vial-card .vial-label {
+    display: block;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
   .chamber-slot small {
     display: block;
@@ -2623,7 +2729,7 @@ const styles = `
   }
 
   @media (max-width: 480px) {
-    .test-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .test-grid { grid-template-columns: 1fr; }
     .machine-frame {
       width: 880px;
       min-width: 880px;
