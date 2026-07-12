@@ -74,7 +74,7 @@ class ReefBotPanel extends HTMLElement {
     });
     this.shadowRoot.querySelectorAll("[data-more-info]").forEach((element) => {
       element.addEventListener("click", (event) => {
-        if (event.target?.closest?.("button")) return;
+        if (element.tagName !== "BUTTON" && event.target?.closest?.("button")) return;
         this.showMoreInfo(element.dataset.moreInfo);
       });
     });
@@ -552,10 +552,10 @@ function renderTests(model) {
             <strong>${escapeHtml(test.name)}</strong>
             <span>${escapeHtml(trend.label)}</span>
           </div>
-        </div>
-        <div class="test-reading">
-          <b>${escapeHtml(formatReading(test.value, test.unit))}</b>
-          ${trend.delta ? `<small class="${trend.deltaClass}">${escapeHtml(trend.delta)}</small>` : ""}
+          <div class="test-reading">
+            <b>${escapeHtml(formatReading(test.value, test.unit))}</b>
+            ${trend.delta ? `<small class="${trend.deltaClass}">${escapeHtml(trend.delta)}</small>` : ""}
+          </div>
         </div>
         ${resultTrend(test.history)}
       </article>
@@ -611,6 +611,7 @@ function renderMachine(model) {
             <div class="syringe-needle"></div>
           </div>
         </div>
+        <div class="gantry"></div>
         <div class="vial-row">
           ${tubes.map(renderVial).join("")}
           ${renderChamberVial(model)}
@@ -722,6 +723,7 @@ function renderMaintenance(model) {
 function renderCompactReservoir(component, title, icon, type) {
   const fill = clamp(component?.percentage ?? 0, 0, 100);
   const action = component?.button;
+  const capacity = component?.capacityNumber;
   const actionLabel = type === "waste" ? "Empty" : "Refill";
   return `
     <article class="maintenance-item ${type}">
@@ -731,7 +733,10 @@ function renderCompactReservoir(component, title, icon, type) {
         <span>${escapeHtml(component?.display || "-")} · ${Math.round(fill)}%</span>
         <div class="mini-level"><i style="width:${fill}%"></i></div>
       </div>
-      <button ${action ? `data-press="${action.entity_id}" data-label="${title}: ${actionLabel}"` : "disabled"}>${actionLabel}</button>
+      <div class="maintenance-actions">
+        <button ${action ? `data-press="${action.entity_id}" data-label="${title}: ${actionLabel}"` : "disabled"}>${actionLabel}</button>
+        <button class="secondary" ${capacity ? `data-more-info="${capacity.entity_id}" title="Set ${title} capacity"` : "disabled"}>Volume</button>
+      </div>
     </article>
   `;
 }
@@ -945,7 +950,32 @@ function componentModel(states, key, terms) {
     display,
     percentage,
     button: findButton(states, [`${key}:`, key]),
+    capacityNumber: findComponentCapacityNumber(states, key, sensor, terms),
   };
+}
+
+function findComponentCapacityNumber(states, key, sensor, terms) {
+  const componentName = sensor?.attributes?.component_name;
+  const searchTerms = [
+    key,
+    ...(terms || []),
+    componentName,
+  ].filter(activeState).map((term) => String(term).toLowerCase());
+
+  return states.find((state) => {
+    if (!state.entity_id.startsWith("number.")) return false;
+    if (!isReefBotEntity(state)) return false;
+    const name = entityName(state).toLowerCase();
+    const entity = state.entity_id.toLowerCase();
+    const isCapacity = name.includes("capacity")
+      || name.includes("kapazität")
+      || name.includes("volume")
+      || entity.includes("capacity")
+      || entity.includes("kapazitat")
+      || entity.includes("volume");
+    if (!isCapacity) return false;
+    return searchTerms.some((term) => name.includes(term) || entity.includes(term.replaceAll(" ", "_")));
+  });
 }
 
 function findOnline(states) {
@@ -1534,17 +1564,16 @@ const styles = `
   }
   .test-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(128px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
   }
   .test-card {
     display: grid;
-    grid-template-rows: auto auto 1fr;
-    gap: 10px;
-    aspect-ratio: 1;
-    min-height: 0;
-    padding: 10px;
-    border-radius: 12px;
+    grid-template-rows: auto 1fr;
+    gap: 12px;
+    min-height: 118px;
+    padding: 12px;
+    border-radius: 8px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028)),
       rgba(255, 255, 255, 0.04);
@@ -1554,14 +1583,14 @@ const styles = `
   }
   .test-card-head {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 10px;
-    align-items: start;
+    align-items: center;
     min-width: 0;
   }
   .play {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
     display: grid;
     place-items: center;
@@ -1584,14 +1613,13 @@ const styles = `
     margin-top: 3px;
   }
   .test-reading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    text-align: left;
+    justify-self: end;
+    min-width: 76px;
+    max-width: 108px;
+    text-align: right;
   }
   .test-reading b {
-    display: inline-block;
+    display: block;
     padding: 5px 8px;
     border-radius: 999px;
     background: rgba(79, 210, 242, 0.12);
@@ -1605,11 +1633,11 @@ const styles = `
     white-space: nowrap;
   }
   .test-reading small {
-    display: inline-block;
-    min-width: 34px;
+    display: block;
+    margin-top: 5px;
     color: #b9c6cb;
     font-size: 11px;
-    line-height: 1.1;
+    line-height: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1619,19 +1647,18 @@ const styles = `
   .test-reading small.flat { color: #b9c6cb; }
   .spark {
     width: 100%;
-    height: 68px;
+    height: 52px;
   }
   .result-trend {
     min-width: 0;
-    align-self: end;
   }
   .trend-values {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 6px;
-    margin-top: -2px;
+    margin-top: -3px;
     color: #b8c7cc;
-    font-size: 9px;
+    font-size: 11px;
     line-height: 1;
   }
   .trend-values span {
@@ -1644,7 +1671,7 @@ const styles = `
   .spark path, .spark polyline {
     fill: none;
     stroke: #4fd2f2;
-    stroke-width: 3;
+    stroke-width: 2.8;
     stroke-linecap: round;
     stroke-linejoin: round;
     opacity: 0.9;
@@ -1654,9 +1681,9 @@ const styles = `
     stroke-width: 1.2;
   }
   .spark circle {
-    fill: #152126;
+    fill: #1d2b2f;
     stroke: #4fd2f2;
-    stroke-width: 2.5;
+    stroke-width: 2.2;
   }
 
   .machine {
@@ -1886,6 +1913,18 @@ const styles = `
     animation: needleDropletFall 9s ease-in-out infinite;
     animation-delay: 0.28s;
   }
+  .gantry {
+    position: absolute;
+    left: 6%;
+    right: 6%;
+    bottom: 134px;
+    height: 34px;
+    background: #20242a;
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 18px 32px rgba(0,0,0,0.35);
+    z-index: 1;
+  }
   .vial-row {
     position: absolute;
     left: 6%;
@@ -1987,23 +2026,23 @@ const styles = `
   .vial-refill {
     position: absolute;
     left: 50%;
-    bottom: 10px;
+    bottom: 9px;
     z-index: 4;
-    width: 24px;
-    height: 24px;
+    width: 23px;
+    height: 23px;
     display: grid;
     place-items: center;
     padding: 0;
-    border-radius: 7px;
+    border-radius: 50%;
     color: #ffe8e8;
-    background: rgba(183, 53, 53, 0.9);
+    background: rgba(183, 53, 53, 0.82);
     border: 1px solid rgba(255, 185, 185, 0.42);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.38), 0 0 12px rgba(183,53,53,0.3);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.36), 0 0 10px rgba(183,53,53,0.22);
     transform: translateX(-50%);
   }
   .vial-refill ha-icon {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
   }
   .vial-card strong {
     display: block;
@@ -2015,7 +2054,7 @@ const styles = `
     place-items: center;
     width: 24px;
     height: 24px;
-    margin: 6px auto 4px;
+    margin: 8px auto 10px;
     border-radius: 50%;
     color: #dff7ff;
     font-size: 15px;
@@ -2027,7 +2066,7 @@ const styles = `
   .vial-card .vial-name,
   .chamber-operation {
     width: 100%;
-    min-height: 40px;
+    min-height: 44px;
     padding: 7px 6px;
     border-radius: 8px;
     background: rgba(8, 18, 21, 0.78);
@@ -2220,6 +2259,17 @@ const styles = `
     border: 1px solid rgba(102, 215, 247, 0.28);
     border-radius: 6px;
     padding: 7px 10px;
+  }
+  .maintenance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .maintenance-actions .secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: #b9cbd1;
+    border-color: rgba(255, 255, 255, 0.14);
   }
   .mini-level {
     height: 6px;
