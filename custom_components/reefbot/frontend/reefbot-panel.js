@@ -552,10 +552,10 @@ function renderTests(model) {
             <strong>${escapeHtml(test.name)}</strong>
             <span>${escapeHtml(trend.label)}</span>
           </div>
-          <div class="test-reading">
-            <b>${escapeHtml(formatReading(test.value, test.unit))}</b>
-            ${trend.delta ? `<small class="${trend.deltaClass}">${escapeHtml(trend.delta)}</small>` : ""}
-          </div>
+        </div>
+        <div class="test-reading">
+          <b>${escapeHtml(formatReading(test.value, test.unit))}</b>
+          ${trend.delta ? `<small class="${trend.deltaClass}">${escapeHtml(trend.delta)}</small>` : ""}
         </div>
         ${resultTrend(test.history)}
       </article>
@@ -578,26 +578,39 @@ function isTestStartLocked(model) {
 }
 
 function renderMachine(model) {
-  const tubes = Array.from({ length: 8 }, (_, index) => model.tubes[index] || emptyTube(index + 1));
+  const vialCount = Math.max(8, model.tubes.length || 8);
+  const totalSlots = vialCount + 1;
+  const tubes = Array.from({ length: vialCount }, (_, index) => model.tubes[index] || emptyTube(index + 1));
   const active = isChamberActive(model);
   const chamber = chamberOperation(model);
-  const activeTubes = activeTubeNumbers(model, chamber.name);
+  const activeTubes = activeTubeNumbers(model, chamber.name, vialCount);
   const sourceA = activeTubes[0] || 1;
   const sourceB = activeTubes[1] || sourceA;
   const frameStyle = [
-    `--source-a-left:${slotLeft(sourceA)}`,
-    `--source-b-left:${slotLeft(sourceB)}`,
-    `--chamber-left:${slotLeft(9)}`,
+    `--total-slots:${totalSlots}`,
+    `--slot-template:repeat(${vialCount}, minmax(60px, 1fr)) minmax(60px, 1fr)`,
+    `--source-a-left:${slotLeft(sourceA, totalSlots)}`,
+    `--source-b-left:${slotLeft(sourceB, totalSlots)}`,
+    `--chamber-left:${slotLeft(totalSlots, totalSlots)}`,
   ].join("; ");
   return `
     <section class="machine">
       <div class="machine-frame ${active ? "active-test" : ""}" style="${frameStyle}">
-        <div class="top-rail"></div>
+        <div class="corner-accent left"></div>
+        <div class="corner-accent right"></div>
+        <div class="rail"><span></span></div>
+        <svg class="energy-chain" viewBox="0 0 1000 72" preserveAspectRatio="none" aria-hidden="true">
+          <path class="chain-shadow" d="M930 16 H610 C548 16 548 52 610 52 H760" />
+          <path class="chain-links" d="M930 16 H610 C548 16 548 52 610 52 H760" />
+        </svg>
         <div class="syringe-carriage">
-          <div class="syringe-body"><span></span></div>
-          <div class="syringe-needle"></div>
+          <div class="syringe-block"></div>
+          <div class="syringe-z">
+            <div class="syringe-guide"></div>
+            <div class="syringe-body"><span></span></div>
+            <div class="syringe-needle"></div>
+          </div>
         </div>
-        <div class="gantry"></div>
         <div class="vial-row">
           ${tubes.map(renderVial).join("")}
           ${renderChamberVial(model)}
@@ -624,7 +637,7 @@ function renderChamberVial(model) {
         <span class="swirl two"></span>
         <span class="stir-bar"></span>
       </div>
-      <strong>Test Chamber</strong>
+      <strong class="chamber-label">Test Chamber</strong>
       <div class="chamber-operation ${active ? "live" : "last"}">
         <span>${escapeHtml(prefix.replace(":", ""))}</span>
         <b>${escapeHtml(operation)}</b>
@@ -635,7 +648,7 @@ function renderChamberVial(model) {
 }
 
 function renderVial(tube) {
-  const height = clamp(tube.percentage * 0.86, 4, 86);
+  const height = clamp(tube.percentage * 0.76, 4, 76);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
   const refillLabel = `Refill Tube ${tube.number}: ${tube.shortName}`;
   return `
@@ -650,7 +663,7 @@ function renderVial(tube) {
         </button>
       </div>
       <strong class="vial-number">${tube.number}</strong>
-      <p>${escapeHtml(tube.shortName)}</p>
+      <p class="vial-name">${escapeHtml(tube.shortName)}</p>
     </article>
   `;
 }
@@ -829,18 +842,19 @@ function firstPendingOperation(pendingSensor, model) {
   };
 }
 
-function activeTubeNumbers(model, operationName) {
+function activeTubeNumbers(model, operationName, vialCount = 8) {
   if (!operationName) return [];
   const match = findConfiguredTestForOperation(model.configuredTests, operationName);
   if (!match?.chemicals?.length) return [];
   return [...new Set(match.chemicals
     .map((chemical) => Number(chemical.tube))
-    .filter((tube) => Number.isInteger(tube) && tube >= 1 && tube <= 8))];
+    .filter((tube) => Number.isInteger(tube) && tube >= 1 && tube <= vialCount))];
 }
 
-function slotLeft(slot) {
-  const safeSlot = clamp(Number(slot) || 1, 1, 9);
-  const percent = 6 + ((safeSlot - 0.5) * 88 / 9);
+function slotLeft(slot, totalSlots = 9) {
+  const safeTotal = Math.max(2, Number(totalSlots) || 9);
+  const safeSlot = clamp(Number(slot) || 1, 1, safeTotal);
+  const percent = 6 + ((safeSlot - 0.5) * 88 / safeTotal);
   return `calc(${percent}% - 32px)`;
 }
 
@@ -1520,16 +1534,17 @@ const styles = `
   }
   .test-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(4, minmax(128px, 1fr));
+    gap: 8px;
   }
   .test-card {
     display: grid;
-    grid-template-rows: auto 1fr;
-    gap: 12px;
-    min-height: 118px;
-    padding: 12px;
-    border-radius: 8px;
+    grid-template-rows: auto auto 1fr;
+    gap: 10px;
+    aspect-ratio: 1;
+    min-height: 0;
+    padding: 10px;
+    border-radius: 12px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028)),
       rgba(255, 255, 255, 0.04);
@@ -1539,19 +1554,23 @@ const styles = `
   }
   .test-card-head {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 10px;
-    align-items: center;
+    align-items: start;
     min-width: 0;
   }
   .play {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     display: grid;
     place-items: center;
     background: #1289a6;
     color: #fff;
+  }
+  .play[disabled] {
+    color: #8fa0a7;
+    background: rgba(255,255,255,0.08);
   }
   .test-main strong {
     display: block;
@@ -1565,13 +1584,14 @@ const styles = `
     margin-top: 3px;
   }
   .test-reading {
-    justify-self: end;
-    min-width: 76px;
-    max-width: 108px;
-    text-align: right;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    text-align: left;
   }
   .test-reading b {
-    display: block;
+    display: inline-block;
     padding: 5px 8px;
     border-radius: 999px;
     background: rgba(79, 210, 242, 0.12);
@@ -1585,11 +1605,11 @@ const styles = `
     white-space: nowrap;
   }
   .test-reading small {
-    display: block;
-    margin-top: 5px;
+    display: inline-block;
+    min-width: 34px;
     color: #b9c6cb;
     font-size: 11px;
-    line-height: 1;
+    line-height: 1.1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1599,18 +1619,19 @@ const styles = `
   .test-reading small.flat { color: #b9c6cb; }
   .spark {
     width: 100%;
-    height: 52px;
+    height: 68px;
   }
   .result-trend {
     min-width: 0;
+    align-self: end;
   }
   .trend-values {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 6px;
-    margin-top: -3px;
+    margin-top: -2px;
     color: #b8c7cc;
-    font-size: 11px;
+    font-size: 9px;
     line-height: 1;
   }
   .trend-values span {
@@ -1623,7 +1644,7 @@ const styles = `
   .spark path, .spark polyline {
     fill: none;
     stroke: #4fd2f2;
-    stroke-width: 2.8;
+    stroke-width: 3;
     stroke-linecap: round;
     stroke-linejoin: round;
     opacity: 0.9;
@@ -1633,13 +1654,13 @@ const styles = `
     stroke-width: 1.2;
   }
   .spark circle {
-    fill: #1d2b2f;
+    fill: #152126;
     stroke: #4fd2f2;
-    stroke-width: 2.2;
+    stroke-width: 2.5;
   }
 
   .machine {
-    min-height: 540px;
+    min-height: 510px;
     overflow-x: auto;
     padding-bottom: 10px;
     scrollbar-color: rgba(102, 215, 247, 0.35) rgba(255,255,255,0.08);
@@ -1648,15 +1669,13 @@ const styles = `
   .machine-frame {
     position: relative;
     width: min(100%, 1320px);
-    min-width: 920px;
-    height: 540px;
+    min-width: max(920px, calc(var(--total-slots, 9) * 84px));
+    height: 510px;
     margin: 0 auto;
     overflow: hidden;
-    border-radius: 14px;
-    background:
-      linear-gradient(145deg, transparent 0 5%, #252d31 5% 10%, transparent 10% 90%, #252d31 90% 95%, transparent 95%),
-      linear-gradient(180deg, #1b2226 0%, #0c1113 100%);
-    border: 12px solid #30383d;
+    clip-path: polygon(26px 0, calc(100% - 26px) 0, 100% 26px, 100% calc(100% - 26px), calc(100% - 26px) 100%, 26px 100%, 0 calc(100% - 26px), 0 26px);
+    background: linear-gradient(180deg, #1b2226 0%, #0c1113 100%);
+    border: 10px solid #30383d;
     box-shadow:
       inset 0 0 0 1px rgba(255, 255, 255, 0.08),
       inset 0 40px 80px rgba(0, 0, 0, 0.45),
@@ -1665,64 +1684,125 @@ const styles = `
   .machine-frame::before {
     content: "";
     position: absolute;
-    inset: 26px;
-    border-radius: 8px;
+    inset: 22px;
+    border-radius: 6px;
     background: linear-gradient(180deg, rgba(255,255,255,0.05), transparent 30%);
     border: 1px solid rgba(255,255,255,0.07);
   }
-  .top-rail {
+  .corner-accent {
     position: absolute;
-    left: 8%;
-    right: 8%;
-    top: 42px;
-    height: 34px;
-    border-radius: 0 0 12px 12px;
-    background: #30363a;
-    box-shadow: inset 0 -12px 18px rgba(0,0,0,0.22);
+    top: 4px;
+    width: 31px;
+    height: 9px;
+    border-radius: 999px;
+    background: rgba(232,240,242,0.70);
+    z-index: 4;
+  }
+  .corner-accent.left {
+    left: 2px;
+    transform: translate(7px, 11px) rotate(-45deg);
+  }
+  .corner-accent.right {
+    right: 2px;
+    transform: translate(-7px, 11px) rotate(45deg);
+  }
+  .rail {
+    position: absolute;
+    left: 5.5%;
+    right: 5.5%;
+    top: 46px;
+    height: 18px;
+    border-radius: 3px;
+    background: #232b30;
+    border-top: 2px solid rgba(255,255,255,0.18);
+    box-shadow: 0 14px 26px rgba(0,0,0,0.28);
+    z-index: 3;
+  }
+  .rail span {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    bottom: 3px;
+    height: 5px;
+    border-radius: 2px;
+    background:
+      repeating-linear-gradient(90deg, #2b3439 0 3px, #0d1113 3px 6px),
+      #0d1113;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.28);
+  }
+  .energy-chain {
+    position: absolute;
+    left: 5.5%;
+    right: 5.5%;
+    top: 12px;
+    height: 64px;
+    z-index: 2;
+    opacity: 0.92;
+    pointer-events: none;
+  }
+  .energy-chain path {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .chain-shadow {
+    stroke: #0b0e10;
+    stroke-width: 12;
+    opacity: 0.65;
+  }
+  .chain-links {
+    stroke: #171c1f;
+    stroke-width: 9;
+    stroke-dasharray: 6 3;
   }
   .syringe-carriage {
     position: absolute;
     left: var(--source-a-left);
     top: 38px;
     width: 64px;
-    height: 190px;
-    z-index: 2;
-    opacity: 0.92;
+    height: 214px;
+    z-index: 5;
+    opacity: 0.94;
     transform: translateX(0);
   }
   .active-test .syringe-carriage {
     animation: syringeCollect 9s ease-in-out infinite;
   }
-  .syringe-carriage::before {
-    content: "";
+  .syringe-block {
     position: absolute;
-    left: 17px;
+    left: 16px;
     top: 0;
-    width: 30px;
-    height: 26px;
-    border-radius: 7px;
+    width: 32px;
+    height: 24px;
+    border-radius: 6px;
     background:
       linear-gradient(135deg, rgba(255,255,255,0.08), transparent 45%),
       #151b1f;
     border: 1px solid rgba(210, 225, 230, 0.22);
     box-shadow: 0 8px 18px rgba(0,0,0,0.34);
   }
-  .syringe-carriage::after {
-    content: "";
+  .syringe-z {
+    position: absolute;
+    inset: 0;
+  }
+  .active-test .syringe-z {
+    animation: syringeZAxis 9s ease-in-out infinite;
+  }
+  .syringe-guide {
     position: absolute;
     left: 29px;
     top: 24px;
     width: 6px;
-    height: 17px;
+    height: 12px;
     border-radius: 4px;
     background: rgba(210, 225, 230, 0.72);
   }
   .syringe-body {
     position: absolute;
     left: 23px;
-    top: 38px;
+    top: 36px;
     width: 18px;
-    height: 112px;
+    height: 88px;
     border-radius: 9px;
     border: 2px solid rgba(200, 218, 222, 0.38);
     background:
@@ -1736,11 +1816,14 @@ const styles = `
     left: 5px;
     right: 5px;
     top: 11px;
-    bottom: 14px;
+    bottom: 10px;
     border-radius: 999px;
     background:
       linear-gradient(180deg, rgba(255,255,255,0.75), rgba(255,255,255,0.15)),
       rgba(108, 215, 241, 0.34);
+    opacity: 0.4;
+    transform: scaleY(0.15);
+    transform-origin: bottom;
   }
   .active-test .syringe-body span {
     animation: syringeFill 9s ease-in-out infinite;
@@ -1751,9 +1834,8 @@ const styles = `
     left: -7px;
     top: 8px;
     width: 5px;
-    height: 86px;
-    background:
-      repeating-linear-gradient(180deg, rgba(8, 12, 14, 0.86) 0 1px, transparent 1px 6px);
+    height: 66px;
+    background: repeating-linear-gradient(180deg, rgba(8, 12, 14, 0.86) 0 1px, transparent 1px 6px);
     opacity: 0.75;
   }
   .syringe-body::after {
@@ -1761,7 +1843,7 @@ const styles = `
     position: absolute;
     left: -16px;
     right: -16px;
-    bottom: 22px;
+    bottom: 20px;
     height: 7px;
     border-radius: 999px;
     background: rgba(210, 220, 222, 0.52);
@@ -1770,9 +1852,9 @@ const styles = `
   .syringe-needle {
     position: absolute;
     left: 31px;
-    top: 150px;
+    top: 124px;
     width: 2px;
-    height: 30px;
+    height: 22px;
     background: rgba(200, 218, 222, 0.72);
     box-shadow: 0 0 8px rgba(108, 215, 241, 0.28);
   }
@@ -1804,51 +1886,47 @@ const styles = `
     animation: needleDropletFall 9s ease-in-out infinite;
     animation-delay: 0.28s;
   }
-  .gantry {
-    position: absolute;
-    left: 9%;
-    right: 9%;
-    bottom: 126px;
-    height: 18px;
-    background: #252b2f;
-    border-radius: 9px;
-    box-shadow: 0 -16px 0 rgba(255,255,255,0.06), 0 18px 32px rgba(0,0,0,0.35);
-  }
   .vial-row {
     position: absolute;
     left: 6%;
     right: 6%;
-    bottom: 24px;
+    bottom: 18px;
     display: grid;
-    grid-template-columns: repeat(8, minmax(60px, 1fr)) minmax(78px, 1.14fr);
+    grid-template-columns: var(--slot-template);
     gap: 6px;
-    align-items: end;
+    align-items: start;
+    min-height: 310px;
+    z-index: 3;
   }
   .vial-card {
-    text-align: center;
     min-width: 0;
+    display: grid;
+    grid-template-rows: 24px 150px 28px 44px auto;
+    justify-items: center;
+    align-items: start;
+    text-align: center;
   }
   .vial-cap {
-    width: min(44px, 72%);
+    width: min(56px, 88%);
     height: 24px;
-    margin: 0 auto -2px;
-    border-radius: 8px 8px 4px 4px;
+    margin: 0;
+    border-radius: 4px;
     background:
       linear-gradient(90deg, rgba(255,255,255,0.08), transparent 30%),
-      linear-gradient(180deg, #22282c, #090d0f);
-    border: 1px solid rgba(255,255,255,0.16);
+      linear-gradient(180deg, #171d20, #07090b);
+    border: 1px solid rgba(255,255,255,0.14);
     box-shadow: 0 5px 10px rgba(0,0,0,0.36);
     position: relative;
     z-index: 2;
   }
   .vial {
     position: relative;
-    width: min(48px, 76%);
+    width: min(56px, 88%);
     height: 150px;
     margin: 0 auto 8px;
-    border-radius: 8px 8px 18px 18px;
+    border-radius: 3px 3px 12px 12px;
     background:
-      linear-gradient(90deg, rgba(255,255,255,0.22), rgba(255,255,255,0.035) 32%, rgba(255,255,255,0.13)),
+      linear-gradient(90deg, rgba(255,255,255,0.19), rgba(255,255,255,0.03) 32%, rgba(255,255,255,0.10)),
       rgba(11, 13, 14, 0.72);
     border: 2px solid rgba(210,220,220,0.27);
     overflow: hidden;
@@ -1874,9 +1952,9 @@ const styles = `
     content: "";
     position: absolute;
     left: -20%;
-    top: -7px;
+    top: -5px;
     width: 140%;
-    height: 14px;
+    height: 10px;
     border-radius: 50%;
     background: rgba(255,255,255,0.25);
     animation: wave 4s ease-in-out infinite;
@@ -1885,30 +1963,31 @@ const styles = `
     position: absolute;
     left: -8px;
     right: -8px;
-    top: 10.5%;
+    top: 9px;
     z-index: 2;
     height: 1px;
     font-style: normal;
-    font-size: 9px;
-    line-height: 1;
+    font-size: 7px;
+    line-height: 0;
     color: rgba(230, 238, 238, 0.68);
     text-shadow: 0 1px 3px rgba(0,0,0,0.7);
-    border-top: 1px solid rgba(230, 238, 238, 0.42);
+    border-top: 1px solid rgba(230, 238, 238, 0.55);
     text-align: right;
     padding-right: 2px;
   }
   .vial span {
     position: absolute;
-    inset: auto 2px 46%;
+    inset: auto 2px 48%;
     z-index: 1;
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 700;
     color: #fff;
     text-shadow: 0 1px 4px rgba(0,0,0,0.7);
   }
   .vial-refill {
     position: absolute;
     left: 50%;
-    bottom: 12px;
+    bottom: 10px;
     z-index: 4;
     width: 24px;
     height: 24px;
@@ -1936,7 +2015,7 @@ const styles = `
     place-items: center;
     width: 24px;
     height: 24px;
-    margin: 0 auto 4px;
+    margin: 6px auto 4px;
     border-radius: 50%;
     color: #dff7ff;
     font-size: 15px;
@@ -1945,8 +2024,17 @@ const styles = `
     border: 1px solid rgba(102, 215, 247, 0.55);
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07), 0 0 12px rgba(102,215,247,0.22);
   }
-  .vial-card p {
-    min-height: 30px;
+  .vial-card .vial-name,
+  .chamber-operation {
+    width: 100%;
+    min-height: 40px;
+    padding: 7px 6px;
+    border-radius: 8px;
+    background: rgba(8, 18, 21, 0.78);
+    border: 1px solid rgba(102, 215, 247, 0.14);
+    box-shadow: 0 10px 22px rgba(0,0,0,0.22);
+  }
+  .vial-card .vial-name {
     color: #edf7fa;
     font-size: 12px;
     line-height: 1.25;
@@ -1955,23 +2043,24 @@ const styles = `
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-
   .chamber-slot small {
     display: block;
+    grid-column: 1;
     color: #9daeb5;
     font-size: 11px;
     margin-top: 5px;
   }
   .chamber-vial {
     position: relative;
-    width: min(58px, 82%);
+    grid-row: 1 / 3;
+    width: min(56px, 88%);
     height: 174px;
     margin: 0 auto 8px;
-    border-radius: 10px 10px 22px 22px;
+    border-radius: 3px 3px 16px 16px;
     border: 2px solid rgba(225,235,238,0.34);
     overflow: visible;
     background:
-      linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.04) 34%, rgba(255,255,255,0.12)),
+      linear-gradient(90deg, rgba(255,255,255,0.19), rgba(255,255,255,0.03) 32%, rgba(255,255,255,0.10)),
       rgba(8, 12, 14, 0.74);
     box-shadow:
       inset 0 18px 22px rgba(0,0,0,0.38),
@@ -1983,7 +2072,7 @@ const styles = `
     position: absolute;
     left: -58px;
     right: -58px;
-    top: 80px;
+    top: 92px;
     height: 6px;
     border-radius: 999px;
     background:
@@ -2003,7 +2092,7 @@ const styles = `
     right: 0;
     bottom: 0;
     height: 45%;
-    border-radius: 0 0 18px 18px;
+    border-radius: 0 0 14px 14px;
     background: linear-gradient(180deg, rgba(135, 222, 241, 0.94), #1289a6);
   }
   .chamber-vial.active i {
@@ -2046,7 +2135,7 @@ const styles = `
   }
   .chamber-vial .measure-beam {
     position: absolute;
-    top: 82px;
+    top: 96px;
     width: 54px;
     height: 4px;
     opacity: 0;
@@ -2062,14 +2151,15 @@ const styles = `
   .chamber-vial.active .beam-right {
     animation-delay: 0.18s;
   }
+  .chamber-label {
+    display: grid !important;
+    place-items: center;
+    height: 28px;
+    margin-top: 6px;
+    color: #a9bac1;
+  }
   .chamber-operation {
-    min-height: 44px;
-    margin: 5px auto 0;
-    padding: 6px 7px;
-    border-radius: 8px;
-    background: rgba(8, 18, 21, 0.78);
-    border: 1px solid rgba(102, 215, 247, 0.14);
-    box-shadow: 0 10px 22px rgba(0,0,0,0.22);
+    margin: 0 auto;
   }
   .chamber-operation.live {
     background: linear-gradient(180deg, rgba(14, 93, 112, 0.42), rgba(8, 18, 21, 0.8));
@@ -2360,30 +2450,43 @@ const styles = `
     44%, 55% { left: var(--source-b-left); }
     67%, 100% { left: var(--chamber-left); }
   }
+  @keyframes syringeZAxis {
+    0%, 2%, 9%, 18%, 20%, 34%, 44%, 45%, 55%, 67%, 69%, 96%, 100% {
+      transform: translateY(0);
+    }
+    3%, 7%, 21%, 32%, 46%, 53%, 70%, 90% {
+      transform: translateY(30px);
+    }
+  }
   @keyframes syringeFill {
-    0%, 11%, 36%, 46%, 58%, 100% {
-      opacity: 0.28;
-      transform: scaleY(0.18);
+    0%, 3%, 34%, 46%, 67%, 90%, 100% {
+      opacity: 0.4;
+      transform: scaleY(0.15);
       transform-origin: bottom;
     }
-    14%, 32%, 48%, 55% {
+    7%, 21%, 53%, 70% {
       opacity: 0.9;
       transform: scaleY(1);
       transform-origin: bottom;
     }
+    22%, 32%, 71%, 81% {
+      opacity: 0.72;
+      transform: scaleY(0.15);
+      transform-origin: bottom;
+    }
   }
   @keyframes needleDropletFall {
-    0%, 20%, 35%, 63%, 80%, 100% {
+    0%, 21%, 33%, 70%, 82%, 100% {
       opacity: 0;
       transform: translate(-50%, 0) scale(0.65);
     }
-    23%, 67% {
+    25%, 74% {
       opacity: 1;
       transform: translate(-50%, 10px) scale(1);
     }
-    31%, 75% {
+    31%, 81% {
       opacity: 0.18;
-      transform: translate(-50%, 76px) scale(0.72);
+      transform: translate(-50%, 42px) scale(0.72);
     }
   }
   @keyframes chamberLiquid {
@@ -2422,7 +2525,7 @@ const styles = `
       grid-template-columns: repeat(3, minmax(120px, 1fr));
     }
     .test-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(128px, 1fr));
     }
   }
 
@@ -2459,39 +2562,22 @@ const styles = `
       width: 920px;
       min-width: 920px;
       max-width: none;
-      height: 540px;
+      height: 510px;
     }
     .syringe-carriage {
       top: 38px;
     }
     .test-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, minmax(128px, 1fr));
     }
   }
 
   @media (max-width: 480px) {
-    .test-card-head {
-      grid-template-columns: auto minmax(0, 1fr);
-    }
-    .test-reading {
-      grid-column: 2;
-      justify-self: start;
-      max-width: 100%;
-      text-align: left;
-    }
-    .test-reading b,
-    .test-reading small {
-      display: inline-block;
-      max-width: 100%;
-      vertical-align: middle;
-    }
-    .test-reading small {
-      margin: 6px 0 0;
-    }
+    .test-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .machine-frame {
       width: 880px;
       min-width: 880px;
-      height: 520px;
+      height: 500px;
       border-width: 8px;
     }
     .syringe-carriage {
