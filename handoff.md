@@ -385,7 +385,7 @@ Die wichtigsten CSS-/DOM-Bausteine:
 - `.page`, `.shell`, `.content-grid`, `.center-stack`
 - `.header`, `.brand-mark`, `.header-metrics`, `.header-chip`
 - `.tests`, `.test-grid`, `.test-card`, `.play`, `.result-trend`
-- `.machine`, `.machine-frame`, `.top-rail`, `.gantry`, `.led-strip`
+- `.machine`, `.machine-frame`, `.top-rail`, `.gantry`
 - `.syringe-carriage`, `.syringe-body`, `.syringe-needle`
 - `.vial-row`, `.vial-card`, `.vial-cap`, `.vial`, `.vial-refill`, `.vial-number`
 - `.chamber-slot`, `.chamber-vial`, `.chamber-operation`, `.chamber-progress`

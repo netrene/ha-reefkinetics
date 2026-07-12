@@ -598,7 +598,6 @@ function renderMachine(model) {
           <div class="syringe-needle"></div>
         </div>
         <div class="gantry"></div>
-        <div class="led-strip"></div>
         <div class="vial-row">
           ${tubes.map(renderVial).join("")}
           ${renderChamberVial(model)}
@@ -1814,15 +1813,6 @@ const styles = `
     background: #252b2f;
     border-radius: 9px;
     box-shadow: 0 -16px 0 rgba(255,255,255,0.06), 0 18px 32px rgba(0,0,0,0.35);
-  }
-  .led-strip {
-    position: absolute;
-    left: 9%;
-    right: 9%;
-    bottom: 158px;
-    height: 3px;
-    background: linear-gradient(90deg, #11b8e5, #e7b75f, #8ad37d, #11b8e5);
-    box-shadow: 0 0 16px rgba(17, 184, 229, 0.6);
   }
   .vial-row {
     position: absolute;
