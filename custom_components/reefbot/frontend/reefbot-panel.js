@@ -14,7 +14,12 @@ class ReefBotPanel extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const now = Date.now();
-    if (!this.shadowRoot.innerHTML || now - this._lastRender > 750) {
+    let refreshInterval = this._activeVial ? 60000 : this._activeDialog || this._confirmAction ? 15000 : 3000;
+    if (this._activeVial && isChamberActive(buildModel(hass, this._lastPressed))) {
+      this._activeVial = undefined;
+      refreshInterval = 0;
+    }
+    if (!this.shadowRoot.innerHTML || now - this._lastRender > refreshInterval) {
       this._lastRender = now;
       this.render();
     }
@@ -304,7 +309,8 @@ function buildModel(hass, lastPressed) {
         state.attributes.method,
         state.state,
       ], state.attributes.available_operation_id),
-    }));
+    }))
+    .filter((test) => test.button);
 
   const tubes = states
     .filter((state) => state.entity_id.startsWith("sensor.") && state.attributes?.tube_number)
@@ -334,12 +340,13 @@ function buildModel(hass, lastPressed) {
       const state = findParameterSensorForConfiguredTest(parameterSensors, configured);
       const latestValue = configured.latest?.value;
       const latestUnit = configured.latest?.unit;
+      const fallbackHistory = [numberValue(latestValue)].filter((value) => typeof value === "number");
       return {
         entityId: state?.entity_id || configured.entityId,
         name: configured.name,
         value: state?.state ?? latestValue,
         unit: state?.attributes.unit_of_measurement || latestUnit || "",
-        history: state ? extractHistory(state) : [numberValue(latestValue)].filter((value) => typeof value === "number"),
+        history: state ? extractHistory(state, configured.operationName || configured.name) : fallbackHistory,
         operationName: configured.name,
         button: configured.button,
       };
@@ -758,12 +765,7 @@ function renderVialDialog(model, activeVial) {
             </div>
             <strong>${escapeHtml(percentage)}</strong>
           </div>
-          <div class="vial-dialog-details">
-            ${vialDetailRow("Füllstand", current)}
-            ${vialDetailRow("Kapazität", capacity)}
-            ${vialDetailRow("Verbleibend", percentage)}
-            ${tube.entityId ? `<button class="secondary wide" data-more-info="${tube.entityId}">HA-Verlauf</button>` : ""}
-          </div>
+          ${tube.entityId ? `<button class="secondary wide vial-history-button" data-more-info="${tube.entityId}">HA-Verlauf</button>` : ""}
         </div>
         <div class="dialog-actions vial-dialog-actions">
           <button class="ghost" data-dialog-close>Schließen</button>
@@ -772,15 +774,6 @@ function renderVialDialog(model, activeVial) {
           </button>
         </div>
       </section>
-    </div>
-  `;
-}
-
-function vialDetailRow(label, value) {
-  return `
-    <div class="vial-detail-row">
-      <span>${escapeHtml(label)}</span>
-      <b>${escapeHtml(value)}</b>
     </div>
   `;
 }
@@ -1273,31 +1266,21 @@ function findConfiguredTestForParameter(configuredTests, parameterName) {
 }
 
 function findParameterSensorForConfiguredTest(parameterSensors, configuredTest) {
-  const exactOperation = parameterSensors.find((state) => {
-    const operationName = state.attributes?.operation_name;
-    return activeState(operationName)
-      && normalize(operationName) === normalize(configuredTest.operationName || configuredTest.name);
-  });
-  if (exactOperation) return exactOperation;
-
-  const keys = [
-    configuredTest.parameter,
+  const operationKeys = [
     configuredTest.operationName,
-    configuredTest.method,
     configuredTest.latest?.operation,
+    configuredTest.method,
     configuredTest.name,
-  ].flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
+  ].map(normalize).filter(Boolean);
 
-  return parameterSensors.find((state) => {
-    const haystack = [
-      state.attributes?.parameter_name,
+  const exactOperation = parameterSensors.find((state) => {
+    const sensorOperationKeys = [
       state.attributes?.operation_name,
       state.attributes?.operation_method,
-      state.attributes?.brand,
-      state.attributes?.friendly_name,
-    ].flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
-    return keys.some((key) => haystack.some((value) => value.includes(key) || key.includes(value)));
+    ].map(normalize).filter(Boolean);
+    return sensorOperationKeys.some((operation) => operationKeys.includes(operation));
   });
+  return exactOperation;
 }
 
 function findConfiguredTestForOperation(configuredTests, operationName) {
@@ -1341,10 +1324,17 @@ function isConfiguredTestSensor(state) {
     && state.attributes?.display_name;
 }
 
-function extractHistory(state) {
+function extractHistory(state, operationName = "") {
   const history = state.attributes.history;
   if (!Array.isArray(history)) return [];
+  const operationKey = normalize(operationName);
   return history
+    .filter((item) => {
+      if (!operationKey) return true;
+      const itemOperation = item.operation || item.OperationName || item.operationName;
+      if (!activeState(itemOperation)) return true;
+      return normalize(itemOperation) === operationKey;
+    })
     .map((item) => numberValue(item.value ?? item.Value ?? item.display_value))
     .filter((value) => typeof value === "number")
     .reverse();
@@ -1653,7 +1643,7 @@ const styles = `
     border-color: rgba(255, 170, 170, 0.34);
   }
   .dialog-actions .secondary,
-  .vial-dialog-details .secondary {
+  .vial-history-button {
     color: #9edff0;
     background: rgba(18, 42, 50, 0.72);
     border: 1px solid rgba(102, 215, 247, 0.24);
@@ -1733,9 +1723,10 @@ const styles = `
   }
   .vial-dialog-body {
     display: grid;
-    grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
-    gap: 22px;
+    grid-template-columns: 1fr;
+    gap: 18px;
     align-items: center;
+    justify-items: center;
   }
   .vial-dialog-visual {
     display: grid;
@@ -1758,44 +1749,24 @@ const styles = `
     line-height: 1.1;
   }
   .vial-dialog-visual .vial em {
-    top: 21px;
+    top: 14px;
     left: -12px;
     right: -12px;
+    height: auto;
     font-size: 13px;
-    padding-right: 5px;
+    line-height: 1.1;
+    padding: 4px 5px 0 0;
+    border-top-color: rgba(230, 238, 238, 0.62);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.85);
   }
   .vial-dialog-visual strong {
     margin-top: 12px;
     color: #edf7fa;
     font-size: 28px;
   }
-  .vial-dialog-details {
-    display: grid;
-    gap: 10px;
-  }
-  .vial-detail-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    padding: 13px 14px;
-    border-radius: 10px;
-    background: rgba(255,255,255,0.045);
-    border: 1px solid rgba(255,255,255,0.08);
-  }
-  .vial-detail-row span {
-    color: #9daeb5;
-    font-size: 12px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .vial-detail-row b {
-    color: #fff;
-    font-size: 18px;
-    text-align: right;
-  }
-  .vial-dialog-details .wide {
+  .vial-history-button {
     width: 100%;
+    max-width: 420px;
     min-height: 42px;
     border-radius: 8px;
   }
