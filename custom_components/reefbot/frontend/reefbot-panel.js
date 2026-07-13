@@ -760,7 +760,7 @@ function renderVialDialog(model, activeVial) {
             <div class="vial-cap"></div>
             <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
               <span>${escapeHtml(current)}</span>
-              <em>${escapeHtml(capacity)}</em>
+              <em><b>${escapeHtml(capacity)}</b></em>
               <i></i>
             </div>
             <strong>${escapeHtml(percentage)}</strong>
@@ -1742,6 +1742,7 @@ const styles = `
     width: 92px;
     height: 248px;
     border-radius: 6px 6px 24px 24px;
+    overflow: visible;
   }
   .vial-dialog-visual .vial span {
     inset: auto 7px 45%;
@@ -1750,14 +1751,26 @@ const styles = `
   }
   .vial-dialog-visual .vial em {
     top: 14px;
-    left: -12px;
-    right: -12px;
-    height: auto;
-    font-size: 13px;
-    line-height: 1.1;
-    padding: 4px 5px 0 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    padding: 0;
     border-top-color: rgba(230, 238, 238, 0.62);
-    text-shadow: 0 1px 3px rgba(0,0,0,0.85);
+  }
+  .vial-dialog-visual .vial em b {
+    position: absolute;
+    left: calc(100% + 14px);
+    top: -8px;
+    width: max-content;
+    color: rgba(230, 238, 238, 0.86);
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.85);
+  }
+  .vial-dialog-visual .vial i::before {
+    left: 0;
+    width: 100%;
   }
   .vial-dialog-visual strong {
     margin-top: 12px;
