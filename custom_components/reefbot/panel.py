@@ -16,7 +16,7 @@ PANEL_URL = "reefbot"
 PANEL_COMPONENT_NAME = "reefbot-panel"
 PANEL_TITLE = "ReefBot"
 PANEL_ICON = "mdi:robot-industrial-outline"
-PANEL_VERSION = "0.12.28"
+PANEL_VERSION = "0.12.29"
 PANEL_FILE = "frontend/reefbot-panel.js"
 PANEL_MODULE_URL = f"/reefbot/panel-{PANEL_VERSION}.js"
 

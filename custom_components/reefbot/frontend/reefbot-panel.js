@@ -388,14 +388,14 @@ function headerChip(label, value, entityId, valueClass = "", dialog = "") {
 
 function pendingOperationLabel(model) {
   const operation = chamberOperation(model);
-  if (operation.active && operation.name) return operation.name;
+  if (operation.active && operation.name) return displayOperationName(operation.name);
   const count = numberValue(model.pending?.state);
   if (count && count > 0) return `${count} pending`;
-  return "Idle";
+  return "Ruhezustand";
 }
 
 function lastOperationLabel(model) {
-  return model.recentOperation?.name || "-";
+  return displayOperationName(model.recentOperation?.name, "-");
 }
 
 function alarmSummary(model) {
@@ -418,7 +418,7 @@ function renderConfirmDialog(action) {
   const message = isRefill
     ? `ReefBot setzt <strong>${escapeHtml(action.name)}</strong> auf voll. Bitte nur bestätigen, wenn das Röhrchen wirklich aufgefüllt wurde.`
     : `ReefBot startet den Test <strong>${escapeHtml(action.name)}</strong>. Währenddessen sollten keine weiteren Tests gestartet werden.`;
-  const buttonLabel = isRefill ? "Refill bestätigen" : "Test starten";
+  const buttonLabel = isRefill ? "Auffüllen bestätigen" : "Test starten";
   return `
     <div class="dialog-backdrop" data-dialog-close>
       <section class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="confirm-action-title" data-dialog-card>
@@ -625,7 +625,7 @@ function renderMachine(model) {
 function renderChamberVial(model) {
   const pendingValue = activeState(model.pending?.state) ? model.pending.state : "0";
   const chamber = chamberOperation(model);
-  const operation = chamber.name || "Idle";
+  const operation = displayOperationName(chamber.name, "Ruhezustand");
   const active = isChamberActive(model);
   const prefix = active ? "Live: " : model.recentOperation ? "Last: " : "";
   const progress = active ? chamberProgress(chamber, model) : undefined;
@@ -652,7 +652,7 @@ function renderChamberVial(model) {
 function renderVial(tube) {
   const height = clamp(tube.percentage * 0.76, 4, 76);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
-  const refillLabel = `Refill Tube ${tube.number}: ${tube.shortName}`;
+  const refillLabel = `Röhrchen ${tube.number} auffüllen: ${tube.shortName}`;
   return `
     <article class="vial-card">
       <div class="vial-cap"></div>
@@ -660,7 +660,7 @@ function renderVial(tube) {
         <span>${escapeHtml(label)}</span>
         <em>20 mL</em>
         <i></i>
-        <button class="vial-refill" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"} title="Refill tube">
+        <button class="vial-refill" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"} title="Röhrchen auffüllen">
           <ha-icon icon="mdi:reload"></ha-icon>
         </button>
       </div>
@@ -675,7 +675,7 @@ function renderVial(tube) {
 function renderReservoir(component, title, icon, type) {
   const fill = clamp(component?.percentage ?? 0, 0, 100);
   const action = component?.button;
-  const actionLabel = type === "waste" ? "Empty" : "Refill";
+  const actionLabel = type === "waste" ? "Leeren" : "Auffüllen";
   return `
     <section class="reservoir ${type}">
       <div class="section-title small">
@@ -702,8 +702,8 @@ function renderSyringe(component) {
   return `
     <section class="syringe">
       <div class="section-title small">
-        <h2>Syringe</h2>
-        <button ${action ? `data-press="${action.entity_id}" data-label="Syringe: Replace"` : "disabled"}>Replace</button>
+        <h2>Spritze</h2>
+        <button ${action ? `data-press="${action.entity_id}" data-label="Spritze: Ersetzen"` : "disabled"}>Ersetzen</button>
       </div>
       <div class="usage-bar">
         <span style="width:${fill}%"></span>
@@ -716,8 +716,8 @@ function renderSyringe(component) {
 function renderMaintenance(model) {
   return `
     <section class="maintenance-bar">
-      ${renderCompactReservoir(model.rodi, "RODI", "mdi:water", "rodi")}
-      ${renderCompactReservoir(model.waste, "Waste", "mdi:trash-can-outline", "waste")}
+      ${renderCompactReservoir(model.rodi, "Osmosewasser", "mdi:water", "rodi")}
+      ${renderCompactReservoir(model.waste, "Abwasser", "mdi:trash-can-outline", "waste")}
       ${renderCompactSyringe(model.syringe)}
     </section>
   `;
@@ -727,7 +727,7 @@ function renderCompactReservoir(component, title, icon, type) {
   const fill = clamp(component?.percentage ?? 0, 0, 100);
   const action = component?.button;
   const capacity = component?.capacityNumber;
-  const actionLabel = type === "waste" ? "Empty" : "Refill";
+  const actionLabel = type === "waste" ? "Leeren" : "Auffüllen";
   return `
     <article class="maintenance-item ${type}">
       <ha-icon icon="${icon}"></ha-icon>
@@ -738,7 +738,7 @@ function renderCompactReservoir(component, title, icon, type) {
       </div>
       <div class="maintenance-actions">
         <button ${action ? `data-press="${action.entity_id}" data-label="${title}: ${actionLabel}"` : "disabled"}>${actionLabel}</button>
-        <button class="secondary" ${capacity ? `data-more-info="${capacity.entity_id}" title="Set ${title} capacity"` : "disabled"}>Volume</button>
+        <button class="secondary" ${capacity ? `data-more-info="${capacity.entity_id}" title="${title} Volumen einstellen"` : "disabled"}>Volumen</button>
       </div>
     </article>
   `;
@@ -751,11 +751,11 @@ function renderCompactSyringe(component) {
     <article class="maintenance-item syringe-compact">
       <ha-icon icon="mdi:needle"></ha-icon>
       <div class="maintenance-main">
-        <strong>Syringe</strong>
+        <strong>Spritze</strong>
         <span>${escapeHtml(component?.display || "-")}</span>
         <div class="mini-level"><i style="width:${fill}%"></i></div>
       </div>
-      <button ${action ? `data-press="${action.entity_id}" data-label="Syringe: Replace"` : "disabled"}>Replace</button>
+      <button ${action ? `data-press="${action.entity_id}" data-label="Spritze: Ersetzen"` : "disabled"}>Ersetzen</button>
     </article>
   `;
 }
@@ -763,9 +763,9 @@ function renderCompactSyringe(component) {
 function renderChamber(model) {
   const pendingValue = activeState(model.pending?.state) ? model.pending.state : "0";
   const chamber = chamberOperation(model);
-  const operation = chamber.name || "Idle";
+  const operation = displayOperationName(chamber.name, "Ruhezustand");
   const active = isChamberActive(model);
-  const stateLabel = active ? "Live" : "Idle";
+  const stateLabel = active ? "Live" : "Ruhezustand";
   const operationPrefix = active ? "Live: " : model.recentOperation ? "Last: " : "";
   const progress = active ? chamberProgress(chamber, model) : undefined;
   return `
@@ -1284,6 +1284,12 @@ function emptyTube(number) {
 function entityName(state) {
   if (!state) return "";
   return state.attributes?.friendly_name || state.entity_id;
+}
+
+function displayOperationName(value, fallback = "") {
+  if (value === undefined || value === null || value === "") return fallback;
+  const text = String(value).trim();
+  return text.toLowerCase() === "idle" ? "Ruhezustand" : text;
 }
 
 function formatReading(value, unit) {
