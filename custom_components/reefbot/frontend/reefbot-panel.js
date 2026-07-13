@@ -8,6 +8,7 @@ class ReefBotPanel extends HTMLElement {
     this._lastPressed = undefined;
     this._confirmAction = undefined;
     this._activeDialog = undefined;
+    this._activeVial = undefined;
   }
 
   set hass(hass) {
@@ -67,11 +68,15 @@ class ReefBotPanel extends HTMLElement {
         </section>
         ${renderConfirmDialog(this._confirmAction)}
         ${renderAlarmDialog(model, this._activeDialog === "alarms")}
+        ${renderVialDialog(model, this._activeVial)}
       </main>
     `;
 
     this.shadowRoot.querySelectorAll("[data-press]").forEach((button) => {
-      button.addEventListener("click", () => this.pressButton(button));
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.pressButton(button);
+      });
     });
     this.shadowRoot.querySelectorAll("[data-more-info]").forEach((element) => {
       element.addEventListener("click", (event) => {
@@ -85,6 +90,15 @@ class ReefBotPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-dialog]").forEach((button) => {
       button.addEventListener("click", () => {
         this._activeDialog = button.dataset.dialog;
+        this._activeVial = undefined;
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-vial-open]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        if (event.target?.closest?.("button")) return;
+        this._activeDialog = undefined;
+        this._activeVial = Number(element.dataset.vialOpen);
         this.render();
       });
     });
@@ -106,6 +120,7 @@ class ReefBotPanel extends HTMLElement {
     const name = button.dataset.label || entityName(this._hass.states[entityId]) || entityId;
     const kind = button.dataset.kind;
     if (kind === "test" || kind === "refill") {
+      this._activeVial = undefined;
       this._confirmAction = { entityId, name, kind };
       this.render();
       return;
@@ -139,6 +154,7 @@ class ReefBotPanel extends HTMLElement {
   closeDialog() {
     this._confirmAction = undefined;
     this._activeDialog = undefined;
+    this._activeVial = undefined;
     this.render();
   }
 
@@ -643,7 +659,7 @@ function renderMachine(model) {
         </div>
         <div class="gantry"></div>
         <div class="vial-row">
-          ${tubes.map(renderVial).join("")}
+          ${tubes.map((tube) => renderVial(tube, active)).join("")}
           ${renderChamberVial(model)}
         </div>
       </div>
@@ -678,18 +694,18 @@ function renderChamberVial(model) {
   `;
 }
 
-function renderVial(tube) {
+function renderVial(tube, locked = false) {
   const height = clamp(tube.percentage * 0.76, 4, 76);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
   const refillLabel = `Röhrchen ${tube.number} auffüllen: ${tube.shortName}`;
   return `
-    <article class="vial-card">
+    <article class="vial-card ${locked ? "locked" : "clickable"}" ${locked ? "" : `data-vial-open="${tube.number}"`}>
       <div class="vial-cap"></div>
       <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
         <span>${escapeHtml(label)}</span>
         <em>20 mL</em>
         <i></i>
-        <button class="vial-refill" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"} title="Röhrchen auffüllen">
+        <button class="vial-refill" ${tube.refillButton && !locked ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"} title="Röhrchen auffüllen">
           <ha-icon icon="mdi:reload"></ha-icon>
         </button>
       </div>
@@ -698,6 +714,63 @@ function renderVial(tube) {
         <span class="vial-label">${escapeHtml(tube.shortName)}</span>
       </p>
     </article>
+  `;
+}
+
+function renderVialDialog(model, activeVial) {
+  if (!activeVial || isChamberActive(model)) return "";
+  const tube = model.tubes.find((item) => item.number === activeVial) || emptyTube(activeVial);
+  const height = clamp(tube.percentage * 0.76, 4, 76);
+  const current = `${formatNumber(tube.current)} ${tube.unit}`;
+  const capacity = `${formatNumber(tube.capacity)} ${tube.unit}`;
+  const percentage = `${Math.round(tube.percentage)}%`;
+  const refillLabel = `Röhrchen ${tube.number} auffüllen: ${tube.shortName}`;
+  return `
+    <div class="dialog-backdrop" data-dialog-close>
+      <section class="dialog-card vial-dialog" role="dialog" aria-modal="true" aria-labelledby="vial-dialog-title" data-dialog-card>
+        <div class="vial-dialog-header">
+          <div>
+            <span>Röhrchen ${escapeHtml(tube.number)}</span>
+            <h2 id="vial-dialog-title">${escapeHtml(tube.shortName)}</h2>
+          </div>
+          <button class="icon-close" data-dialog-close title="Schließen">
+            <ha-icon icon="mdi:close"></ha-icon>
+          </button>
+        </div>
+        <div class="vial-dialog-body">
+          <div class="vial-dialog-visual">
+            <div class="vial-cap"></div>
+            <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
+              <span>${escapeHtml(current)}</span>
+              <em>${escapeHtml(capacity)}</em>
+              <i></i>
+            </div>
+            <strong>${escapeHtml(percentage)}</strong>
+          </div>
+          <div class="vial-dialog-details">
+            ${vialDetailRow("Füllstand", current)}
+            ${vialDetailRow("Kapazität", capacity)}
+            ${vialDetailRow("Verbleibend", percentage)}
+            ${tube.entityId ? `<button class="secondary wide" data-more-info="${tube.entityId}">HA-Verlauf</button>` : ""}
+          </div>
+        </div>
+        <div class="dialog-actions vial-dialog-actions">
+          <button class="ghost" data-dialog-close>Schließen</button>
+          <button class="primary danger" ${tube.refillButton ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"}>
+            Auffüllen
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function vialDetailRow(label, value) {
+  return `
+    <div class="vial-detail-row">
+      <span>${escapeHtml(label)}</span>
+      <b>${escapeHtml(value)}</b>
+    </div>
   `;
 }
 
@@ -1540,6 +1613,22 @@ const styles = `
     background: #b73535;
     border-color: rgba(255, 170, 170, 0.34);
   }
+  .dialog-actions .secondary,
+  .vial-dialog-details .secondary {
+    color: #9edff0;
+    background: rgba(18, 42, 50, 0.72);
+    border: 1px solid rgba(102, 215, 247, 0.24);
+  }
+  .icon-close {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
   .alarm-dialog {
     width: min(620px, 100%);
   }
@@ -1577,6 +1666,105 @@ const styles = `
   }
   .alarm-list .empty-row {
     color: #aebec5;
+  }
+  .vial-dialog {
+    width: min(620px, 100%);
+    max-height: min(88vh, 720px);
+  }
+  .vial-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .vial-dialog-header span {
+    display: block;
+    margin-bottom: 4px;
+    color: #72ddf8;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .vial-dialog-header h2 {
+    margin: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.12;
+  }
+  .vial-dialog-body {
+    display: grid;
+    grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+    gap: 22px;
+    align-items: center;
+  }
+  .vial-dialog-visual {
+    display: grid;
+    justify-items: center;
+    gap: 0;
+  }
+  .vial-dialog-visual .vial-cap {
+    width: 92px;
+    height: 38px;
+    border-radius: 8px;
+  }
+  .vial-dialog-visual .vial {
+    width: 92px;
+    height: 248px;
+    border-radius: 6px 6px 24px 24px;
+  }
+  .vial-dialog-visual .vial span {
+    inset: auto 7px 45%;
+    font-size: 22px;
+    line-height: 1.1;
+  }
+  .vial-dialog-visual .vial em {
+    top: 21px;
+    left: -12px;
+    right: -12px;
+    font-size: 13px;
+    padding-right: 5px;
+  }
+  .vial-dialog-visual strong {
+    margin-top: 12px;
+    color: #edf7fa;
+    font-size: 28px;
+  }
+  .vial-dialog-details {
+    display: grid;
+    gap: 10px;
+  }
+  .vial-detail-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 13px 14px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.045);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .vial-detail-row span {
+    color: #9daeb5;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .vial-detail-row b {
+    color: #fff;
+    font-size: 18px;
+    text-align: right;
+  }
+  .vial-dialog-details .wide {
+    width: 100%;
+    min-height: 42px;
+    border-radius: 8px;
+  }
+  .vial-dialog-actions {
+    margin-top: 20px;
+  }
+  .vial-dialog-actions button {
+    min-width: 132px;
   }
 
   .page {
@@ -2165,6 +2353,28 @@ const styles = `
     justify-items: center;
     align-items: start;
     text-align: center;
+  }
+  .vial-card.clickable {
+    cursor: pointer;
+  }
+  .vial-card.clickable .vial,
+  .vial-card.clickable .vial-name {
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  }
+  .vial-card.clickable:hover .vial {
+    border-color: rgba(102, 215, 247, 0.44);
+    box-shadow:
+      inset 0 16px 18px rgba(0,0,0,0.34),
+      inset 0 0 18px rgba(0,0,0,0.42),
+      0 10px 22px rgba(0,0,0,0.3),
+      0 0 16px rgba(102, 215, 247, 0.15);
+    transform: translateY(-1px);
+  }
+  .vial-card.clickable:hover .vial-name {
+    border-color: rgba(102, 215, 247, 0.32);
+  }
+  .vial-card.locked {
+    cursor: default;
   }
   .vial-cap {
     width: min(56px, 88%);
@@ -2868,11 +3078,56 @@ const styles = `
       justify-self: start;
       min-width: 0;
     }
+    .vial-dialog-body {
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+    .vial-dialog-visual .vial-cap {
+      width: 104px;
+      height: 40px;
+    }
+    .vial-dialog-visual .vial {
+      width: 104px;
+      height: 260px;
+    }
   }
 
   @media (max-width: 480px) {
     .page {
       padding: 6px;
+    }
+    .dialog-backdrop {
+      padding: 10px;
+    }
+    .dialog-card {
+      border-radius: 12px;
+      padding: 16px;
+      max-height: 92vh;
+    }
+    .vial-dialog-header {
+      margin-bottom: 14px;
+    }
+    .vial-dialog-header h2 {
+      font-size: 21px;
+    }
+    .vial-dialog-visual .vial-cap {
+      width: 96px;
+      height: 38px;
+    }
+    .vial-dialog-visual .vial {
+      width: 96px;
+      height: 238px;
+    }
+    .vial-dialog-visual .vial span {
+      font-size: 20px;
+    }
+    .vial-dialog-actions {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+    .vial-dialog-actions button {
+      width: 100%;
+      min-height: 46px;
     }
     .test-grid { grid-template-columns: 1fr; }
     .operation-strip {
