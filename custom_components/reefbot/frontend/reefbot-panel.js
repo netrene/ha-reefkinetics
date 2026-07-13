@@ -2739,8 +2739,10 @@ const styles = `
     }
     .test-grid { grid-template-columns: 1fr; }
     .machine {
-      height: 237px;
+      width: calc(100vw - 2px);
+      height: 272px;
       min-height: 0;
+      margin-left: calc(50% - 50vw + 1px);
       overflow: visible;
       padding-bottom: 0;
     }
@@ -2750,7 +2752,7 @@ const styles = `
       height: 500px;
       border-width: 8px;
       margin: 0;
-      transform: scale(0.474);
+      transform: scale(0.543);
       transform-origin: top left;
     }
     .syringe-carriage {
@@ -2758,30 +2760,48 @@ const styles = `
     }
   }
 
-  @media (max-width: 420px) {
+  @media (max-width: 460px) {
     .machine {
-      height: 228px;
+      height: 260px;
     }
     .machine-frame {
-      transform: scale(0.456);
+      transform: scale(0.52);
+    }
+  }
+
+  @media (max-width: 440px) {
+    .machine {
+      height: 243px;
+    }
+    .machine-frame {
+      transform: scale(0.486);
+    }
+  }
+
+  @media (max-width: 420px) {
+    .machine {
+      height: 232px;
+    }
+    .machine-frame {
+      transform: scale(0.463);
     }
   }
 
   @media (max-width: 400px) {
     .machine {
-      height: 215px;
+      height: 221px;
     }
     .machine-frame {
-      transform: scale(0.43);
+      transform: scale(0.441);
     }
   }
 
   @media (max-width: 380px) {
     .machine {
-      height: 206px;
+      height: 209px;
     }
     .machine-frame {
-      transform: scale(0.412);
+      transform: scale(0.418);
     }
   }
 `;
