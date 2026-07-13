@@ -325,11 +325,26 @@ function buildModel(hass, lastPressed) {
       };
     });
 
-  const tests = states
+  const parameterSensors = states
     .filter(isParameterSensor)
-    .sort((a, b) => (a.attributes.parameter_name || a.attributes.friendly_name || "").localeCompare(b.attributes.parameter_name || b.attributes.friendly_name || ""))
-    .slice(0, 6)
-    .map((state) => {
+    .sort((a, b) => (a.attributes.parameter_name || a.attributes.friendly_name || "").localeCompare(b.attributes.parameter_name || b.attributes.friendly_name || ""));
+
+  const tests = configuredTests.length
+    ? configuredTests.map((configured) => {
+      const state = findParameterSensorForConfiguredTest(parameterSensors, configured);
+      const latestValue = configured.latest?.value;
+      const latestUnit = configured.latest?.unit;
+      return {
+        entityId: state?.entity_id || configured.entityId,
+        name: configured.name,
+        value: state?.state ?? latestValue,
+        unit: state?.attributes.unit_of_measurement || latestUnit || "",
+        history: state ? extractHistory(state) : [numberValue(latestValue)].filter((value) => typeof value === "number"),
+        operationName: configured.name,
+        button: configured.button,
+      };
+    })
+    : parameterSensors.slice(0, 6).map((state) => {
       const parameterName = state.attributes.parameter_name || state.attributes.friendly_name || state.entity_id;
       const configured = findConfiguredTestForParameter(configuredTests, parameterName);
       return {
@@ -382,13 +397,13 @@ function renderHeader(model) {
       </div>
       <div>
         <h1>ReefBot</h1>
-        <p>Reagent control, tests, and maintenance</p>
+        <p>Reagenzien, Tests und Wartung</p>
       </div>
       <div class="header-metrics">
         ${headerChip("Status", onlineText, online?.entity_id, onlineClass)}
-        ${headerChip("Pending operation", pendingOperationLabel(model), model.currentOperation?.entity_id)}
-        ${headerChip("Last operation", lastOperationLabel(model), model.currentOperation?.entity_id)}
-        ${headerChip("Alarms & status", alarmSummary(model), model.alarmLogs?.entity_id || model.notifications?.entity_id, alarmClass(model), "alarms")}
+        ${headerChip("Aktueller Vorgang", pendingOperationLabel(model), model.currentOperation?.entity_id)}
+        ${headerChip("Letzter Vorgang", lastOperationLabel(model), model.currentOperation?.entity_id)}
+        ${headerChip("Alarme & Status", alarmSummary(model), model.alarmLogs?.entity_id || model.notifications?.entity_id, alarmClass(model), "alarms")}
       </div>
     </header>
   `;
@@ -407,7 +422,7 @@ function pendingOperationLabel(model) {
   const operation = chamberOperation(model);
   if (operation.active && operation.name) return displayOperationName(operation.name);
   const count = numberValue(model.pending?.state);
-  if (count && count > 0) return `${count} pending`;
+  if (count && count > 0) return count === 1 ? "1 wartend" : `${count} wartend`;
   return "Ruhezustand";
 }
 
@@ -558,10 +573,10 @@ function renderTests(model) {
   const cards = tests.slice(0, 5).map((test) => {
     const button = test.button;
     const disabled = !button || testStartLocked ? "disabled" : "";
-    const title = testStartLocked ? "ReefBot is busy" : "Start test";
+    const title = testStartLocked ? "ReefBot ist beschäftigt" : "Test starten";
     const trend = testTrendSummary(test.history, test.unit);
     return `
-      <article class="test-card" ${test.entityId ? `data-more-info="${test.entityId}"` : ""} title="Open history">
+      <article class="test-card" ${test.entityId ? `data-more-info="${test.entityId}"` : ""} title="Verlauf öffnen">
         <div class="test-card-head">
           <button class="play" ${button ? `data-press="${button.entity_id}" data-kind="test" data-label="${escapeHtml(test.operationName || test.name)}"` : ""} ${disabled} title="${title}">
             <ha-icon icon="mdi:play"></ha-icon>
@@ -584,9 +599,9 @@ function renderTests(model) {
     <section class="tests">
       <div class="section-title">
         <h2>Tests</h2>
-        <span>${model.pending?.state && model.pending.state !== "0" ? `${escapeHtml(model.pending.state)} pending` : "Ready"}</span>
+        <span>${model.pending?.state && model.pending.state !== "0" ? `${escapeHtml(model.pending.state)} wartend` : "Bereit"}</span>
       </div>
-      <div class="test-grid">${cards || `<div class="empty compact">No test entities found yet.</div>`}</div>
+      <div class="test-grid">${cards || `<div class="empty compact">Noch keine Test-Entitäten gefunden.</div>`}</div>
     </section>
   `;
 }
@@ -672,7 +687,7 @@ function renderChamberVial(model) {
   const chamber = chamberOperation(model);
   const operation = displayOperationName(chamber.name, "Ruhezustand");
   const active = isChamberActive(model);
-  const prefix = active ? "Live: " : model.recentOperation ? "Last: " : "";
+  const prefix = active ? "Live: " : model.recentOperation ? "Letzter: " : "";
   const progress = active ? chamberProgress(chamber, model) : undefined;
   return `
     <article class="vial-card chamber-slot">
@@ -684,12 +699,12 @@ function renderChamberVial(model) {
         <span class="swirl two"></span>
         <span class="stir-bar"></span>
       </div>
-      <strong class="chamber-label">Test Chamber</strong>
+      <strong class="chamber-label">Testkammer</strong>
       <div class="chamber-operation ${active ? "live" : "last"}">
         <span>${escapeHtml(prefix.replace(":", ""))}</span>
         <b>${escapeHtml(operation)}</b>
       </div>
-      ${progress ? renderChamberProgress(progress) : `<small>${escapeHtml(pendingValue)} pending</small>`}
+      ${progress ? renderChamberProgress(progress) : `<small>${escapeHtml(pendingValue)} wartend</small>`}
     </article>
   `;
 }
@@ -697,7 +712,6 @@ function renderChamberVial(model) {
 function renderVial(tube, locked = false) {
   const height = clamp(tube.percentage * 0.76, 4, 76);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
-  const refillLabel = `Röhrchen ${tube.number} auffüllen: ${tube.shortName}`;
   return `
     <article class="vial-card ${locked ? "locked" : "clickable"}" ${locked ? "" : `data-vial-open="${tube.number}"`}>
       <div class="vial-cap"></div>
@@ -705,9 +719,6 @@ function renderVial(tube, locked = false) {
         <span>${escapeHtml(label)}</span>
         <em>20 mL</em>
         <i></i>
-        <button class="vial-refill" ${tube.refillButton && !locked ? `data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}"` : "disabled"} title="Röhrchen auffüllen">
-          <ha-icon icon="mdi:reload"></ha-icon>
-        </button>
       </div>
       <p class="vial-name">
         <strong class="vial-number">${tube.number}</strong>
@@ -1018,10 +1029,10 @@ function progressFromSensors(model) {
 
 function renderChamberProgress(progress) {
   return `
-    <div class="chamber-progress" title="${progress.durationMinutes} min scheduled duration">
+    <div class="chamber-progress" title="${progress.durationMinutes} min geplante Dauer">
       <span style="width:${progress.percent}%"></span>
     </div>
-    <p>${formatRemaining(progress.remainingMs)} remaining · ${Math.round(progress.percent)}% · ${progress.durationMinutes} min test</p>
+    <p>${formatRemaining(progress.remainingMs)} verbleibend · ${Math.round(progress.percent)}% · ${progress.durationMinutes} min Test</p>
   `;
 }
 
@@ -1261,6 +1272,34 @@ function findConfiguredTestForParameter(configuredTests, parameterName) {
   });
 }
 
+function findParameterSensorForConfiguredTest(parameterSensors, configuredTest) {
+  const exactOperation = parameterSensors.find((state) => {
+    const operationName = state.attributes?.operation_name;
+    return activeState(operationName)
+      && normalize(operationName) === normalize(configuredTest.operationName || configuredTest.name);
+  });
+  if (exactOperation) return exactOperation;
+
+  const keys = [
+    configuredTest.parameter,
+    configuredTest.operationName,
+    configuredTest.method,
+    configuredTest.latest?.operation,
+    configuredTest.name,
+  ].flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
+
+  return parameterSensors.find((state) => {
+    const haystack = [
+      state.attributes?.parameter_name,
+      state.attributes?.operation_name,
+      state.attributes?.operation_method,
+      state.attributes?.brand,
+      state.attributes?.friendly_name,
+    ].flatMap((term) => searchAliases(term)).map(normalize).filter(Boolean);
+    return keys.some((key) => haystack.some((value) => value.includes(key) || key.includes(value)));
+  });
+}
+
 function findConfiguredTestForOperation(configuredTests, operationName) {
   const keys = searchAliases(operationName).map(normalize).filter(Boolean);
   return configuredTests.find((test) => {
@@ -1315,7 +1354,7 @@ function testTrendSummary(values = [], unit = "") {
   const recent = values.filter((value) => typeof value === "number").slice(-2);
   if (recent.length < 2) {
     return {
-      label: "Latest result",
+      label: "Letztes Ergebnis",
       delta: "",
       deltaClass: "",
     };
@@ -1323,7 +1362,7 @@ function testTrendSummary(values = [], unit = "") {
   const delta = recent[recent.length - 1] - recent[recent.length - 2];
   const sign = delta > 0 ? "+" : "";
   return {
-    label: "Last change",
+    label: "Letzte Änderung",
     delta: `${sign}${formatNumber(delta)} ${unit || ""}`.trim(),
     deltaClass: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
   };
@@ -2453,29 +2492,6 @@ const styles = `
     font-weight: 700;
     color: #fff;
     text-shadow: 0 1px 4px rgba(0,0,0,0.7);
-  }
-  .vial-refill {
-    position: absolute;
-    left: 50%;
-    bottom: 9px;
-    z-index: 4;
-    width: 23px;
-    height: 23px;
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border-radius: 50%;
-    color: #ffe8e8;
-    background: rgba(183, 53, 53, 0.82);
-    border: 1px solid rgba(255, 185, 185, 0.42);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.36), 0 0 10px rgba(183,53,53,0.22);
-    overflow: hidden;
-    transform: translateX(-50%);
-  }
-  .vial-refill ha-icon {
-    width: 15px;
-    height: 15px;
-    --mdc-icon-size: 15px;
   }
   .vial-card strong {
     display: block;
