@@ -717,12 +717,12 @@ function renderChamberVial(model) {
 }
 
 function renderVial(tube, locked = false) {
-  const height = clamp(tube.percentage * 0.76, 4, 76);
+  const fillRatio = vialFillRatio(tube.percentage);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
   return `
     <article class="vial-card ${locked ? "locked" : "clickable"}" ${locked ? "" : `data-vial-open="${tube.number}"`}>
       <div class="vial-cap"></div>
-      <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
+      <div class="vial" style="--fill-ratio:${fillRatio}; --liquid:${tube.color}">
         <span>${escapeHtml(label)}</span>
         <em>20 mL</em>
         <i></i>
@@ -738,7 +738,7 @@ function renderVial(tube, locked = false) {
 function renderVialDialog(model, activeVial) {
   if (!activeVial || isChamberActive(model)) return "";
   const tube = model.tubes.find((item) => item.number === activeVial) || emptyTube(activeVial);
-  const height = clamp(tube.percentage * 0.76, 4, 76);
+  const fillRatio = vialFillRatio(tube.percentage);
   const current = `${formatNumber(tube.current)} ${tube.unit}`;
   const capacity = `${formatNumber(tube.capacity)} ${tube.unit}`;
   const percentage = `${Math.round(tube.percentage)}%`;
@@ -758,7 +758,7 @@ function renderVialDialog(model, activeVial) {
         <div class="vial-dialog-body">
           <div class="vial-dialog-visual">
             <div class="vial-cap"></div>
-            <div class="vial" style="--fill:${height}%; --liquid:${tube.color}">
+            <div class="vial" style="--fill-ratio:${fillRatio}; --liquid:${tube.color}">
               <span>${escapeHtml(current)}</span>
               <em><b>${escapeHtml(capacity)}</b></em>
               <i></i>
@@ -800,6 +800,10 @@ function renderReservoir(component, title, icon, type) {
       </div>
     </section>
   `;
+}
+
+function vialFillRatio(percentage) {
+  return Math.round(clamp(percentage ?? 0, 0, 100) * 100) / 10000;
 }
 
 function renderSyringe(component) {
@@ -1739,6 +1743,7 @@ const styles = `
     border-radius: 8px;
   }
   .vial-dialog-visual .vial {
+    --calibration-top: 14px;
     width: 92px;
     height: 248px;
     border-radius: 6px 6px 24px 24px;
@@ -2414,6 +2419,7 @@ const styles = `
   }
   .vial {
     position: relative;
+    --calibration-top: 9px;
     width: min(56px, 88%);
     height: 150px;
     margin: 0 auto 8px;
@@ -2433,8 +2439,9 @@ const styles = `
     left: 0;
     right: 0;
     bottom: 0;
-    height: var(--fill);
-    min-height: 8px;
+    height: calc(100% - var(--calibration-top));
+    transform: scaleY(var(--fill-ratio));
+    transform-origin: bottom;
     background:
       linear-gradient(90deg, rgba(255,255,255,0.20), transparent 26%, rgba(0,0,0,0.08)),
       linear-gradient(180deg, color-mix(in srgb, var(--liquid), white 18%), var(--liquid));
