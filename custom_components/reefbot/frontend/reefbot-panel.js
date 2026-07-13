@@ -719,14 +719,16 @@ function renderChamberVial(model) {
 function renderVial(tube, locked = false) {
   const fillRatio = vialFillRatio(tube.percentage);
   const label = `${formatNumber(tube.current)} ${tube.unit}`;
+  const capacity = `${formatNumber(tube.capacity)} ${tube.unit}`;
   return `
     <article class="vial-card ${locked ? "locked" : "clickable"}" ${locked ? "" : `data-vial-open="${tube.number}"`}>
       <div class="vial-cap"></div>
       <div class="vial" style="--fill-ratio:${fillRatio}; --liquid:${tube.color}">
         <span>${escapeHtml(label)}</span>
-        <em>20 mL</em>
+        <em></em>
         <i></i>
       </div>
+      <small class="vial-capacity-label">${escapeHtml(capacity)}</small>
       <p class="vial-name">
         <strong class="vial-number">${tube.number}</strong>
         <span class="vial-label">${escapeHtml(tube.shortName)}</span>
@@ -2375,6 +2377,7 @@ const styles = `
     z-index: 3;
   }
   .vial-card {
+    position: relative;
     min-width: 0;
     display: grid;
     grid-template-rows: 24px 150px auto;
@@ -2474,6 +2477,21 @@ const styles = `
     border-top: 1px solid rgba(230, 238, 238, 0.55);
     text-align: right;
     padding-right: 2px;
+  }
+  .vial-capacity-label {
+    position: absolute;
+    top: 29px;
+    left: calc(50% + 33px);
+    z-index: 4;
+    width: max-content;
+    max-width: 42px;
+    color: rgba(230, 238, 238, 0.72);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    text-align: left;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.85);
+    pointer-events: none;
   }
   .vial span {
     position: absolute;
