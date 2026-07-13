@@ -59,6 +59,7 @@ class ReefBotPanel extends HTMLElement {
           <section class="content-grid">
             <section class="center-stack">
               ${renderTests(model)}
+              ${renderOperationStrip(model)}
               ${renderMachine(model)}
               ${renderMaintenance(model)}
             </section>
@@ -576,6 +577,34 @@ function renderTests(model) {
 
 function isTestStartLocked(model) {
   return isChamberActive(model) || (numberValue(model.pending?.state) || 0) > 0;
+}
+
+function renderOperationStrip(model) {
+  const chamber = chamberOperation(model);
+  const active = isChamberActive(model);
+  const progress = active ? chamberProgress(chamber, model) : undefined;
+  const pendingCount = numberValue(model.pending?.state) || 0;
+  const label = active ? "Aktueller Test" : model.recentOperation?.name ? "Letzter Vorgang" : "Status";
+  const operation = active
+    ? displayOperationName(chamber.name, "Aktiver Test")
+    : displayOperationName(model.recentOperation?.name, "Ruhezustand");
+  const percent = active && progress ? Math.round(progress.percent) : 0;
+  const progressStyle = `--progress:${clamp(percent, 0, 100)}%`;
+  const remaining = active ? (progress ? formatRemaining(progress.remainingMs) : "läuft") : "Ruhezustand";
+  const duration = active && progress ? `${progress.durationMinutes} min` : "";
+  const pendingText = pendingCount === 1 ? "1 wartend" : `${pendingCount} wartend`;
+  const meta = active ? (progress ? `${percent}% · ${duration}` : "Dauer offen") : pendingText;
+
+  return `
+    <section class="operation-strip ${active ? "active" : "idle"}" style="${progressStyle}" ${model.currentOperation?.entity_id ? `data-more-info="${model.currentOperation.entity_id}"` : ""}>
+      <div class="operation-strip-main">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(operation)}</strong>
+      </div>
+      <b class="operation-strip-time">${escapeHtml(remaining)}</b>
+      <span class="operation-strip-meta">${escapeHtml(meta)}</span>
+    </section>
+  `;
 }
 
 function renderMachine(model) {
@@ -1787,6 +1816,97 @@ const styles = `
     stroke-width: 2.2;
   }
 
+  .operation-strip {
+    --progress: 0%;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    overflow: hidden;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.048), rgba(255, 255, 255, 0.018)),
+      rgba(7, 19, 23, 0.86);
+    border: 1px solid rgba(102, 215, 247, 0.18);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.22);
+  }
+  .operation-strip[data-more-info] {
+    cursor: pointer;
+  }
+  .operation-strip::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--progress);
+    background:
+      linear-gradient(90deg, rgba(18, 137, 166, 0.42), rgba(79, 210, 242, 0.22)),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
+    box-shadow: 20px 0 46px rgba(79, 210, 242, 0.12);
+    opacity: 0;
+    transition: width 0.5s ease, opacity 0.25s ease;
+  }
+  .operation-strip.idle::before {
+    width: 100%;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0));
+    opacity: 1;
+    box-shadow: none;
+  }
+  .operation-strip.active::before {
+    opacity: 1;
+  }
+  .operation-strip > * {
+    position: relative;
+    z-index: 1;
+  }
+  .operation-strip-main {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+  .operation-strip-main span {
+    color: #8fa3ab;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+  .operation-strip-main strong {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: #edf7fa;
+    font-size: 17px;
+    line-height: 1.18;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .operation-strip-time {
+    color: #effbff;
+    font-size: 25px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .operation-strip.idle .operation-strip-time {
+    color: #aebdc3;
+    font-size: 18px;
+  }
+  .operation-strip-meta {
+    min-width: 84px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: rgba(79, 210, 242, 0.12);
+    border: 1px solid rgba(79, 210, 242, 0.2);
+    color: #d6f5fb;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+  }
+
   .machine {
     min-height: 510px;
     overflow-x: auto;
@@ -2737,6 +2857,17 @@ const styles = `
     .test-grid {
       grid-template-columns: repeat(2, minmax(128px, 1fr));
     }
+    .operation-strip {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 10px;
+      min-height: 58px;
+      padding: 11px 12px;
+    }
+    .operation-strip-meta {
+      grid-column: 1 / -1;
+      justify-self: start;
+      min-width: 0;
+    }
   }
 
   @media (max-width: 480px) {
@@ -2744,6 +2875,26 @@ const styles = `
       padding: 6px;
     }
     .test-grid { grid-template-columns: 1fr; }
+    .operation-strip {
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .operation-strip-main span {
+      font-size: 10px;
+    }
+    .operation-strip-main strong {
+      font-size: 14px;
+    }
+    .operation-strip-time {
+      font-size: 20px;
+    }
+    .operation-strip.idle .operation-strip-time {
+      font-size: 15px;
+    }
+    .operation-strip-meta {
+      font-size: 11px;
+      padding: 6px 9px;
+    }
     .machine {
       width: calc(100vw - 2px);
       height: 272px;
