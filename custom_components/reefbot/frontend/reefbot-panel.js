@@ -2734,15 +2734,54 @@ const styles = `
   }
 
   @media (max-width: 480px) {
+    .page {
+      padding: 6px;
+    }
     .test-grid { grid-template-columns: 1fr; }
+    .machine {
+      height: 237px;
+      min-height: 0;
+      overflow: visible;
+      padding-bottom: 0;
+    }
     .machine-frame {
       width: 880px;
       min-width: 880px;
       height: 500px;
       border-width: 8px;
+      margin: 0;
+      transform: scale(0.474);
+      transform-origin: top left;
     }
     .syringe-carriage {
       top: 36px;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .machine {
+      height: 228px;
+    }
+    .machine-frame {
+      transform: scale(0.456);
+    }
+  }
+
+  @media (max-width: 400px) {
+    .machine {
+      height: 215px;
+    }
+    .machine-frame {
+      transform: scale(0.43);
+    }
+  }
+
+  @media (max-width: 380px) {
+    .machine {
+      height: 206px;
+    }
+    .machine-frame {
+      transform: scale(0.412);
     }
   }
 `;
