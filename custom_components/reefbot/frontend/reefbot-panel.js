@@ -2998,7 +2998,7 @@ const styles = `
     }
   }
   @keyframes needleDropletFall {
-    0%, 21%, 33%, 70%, 82%, 100% {
+    0%, 21%, 34%, 70%, 83%, 100% {
       opacity: 0;
       transform: translate(-50%, 0) scale(0.65);
     }
@@ -3009,6 +3009,10 @@ const styles = `
     31%, 81% {
       opacity: 0.18;
       transform: translate(-50%, 42px) scale(0.72);
+    }
+    33%, 82% {
+      opacity: 0;
+      transform: translate(-50%, 50px) scale(0.6);
     }
   }
   @keyframes chamberLiquid {
