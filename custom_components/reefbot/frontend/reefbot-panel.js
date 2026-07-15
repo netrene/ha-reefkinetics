@@ -121,14 +121,13 @@ class ReefBotPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-lab-demo]").forEach((button) => {
       button.addEventListener("click", () => {
         LAB_DEMO = !LAB_DEMO;
-        LAB_DEMO_ACTIVE = false;
         this._labState = { cur: 0, tgt: 0 };
         this.render();
       });
     });
     this.shadowRoot.querySelectorAll("[data-lab-demo-active]").forEach((button) => {
       button.addEventListener("click", () => {
-        LAB_DEMO_ACTIVE = !LAB_DEMO_ACTIVE;
+        DEMO_ANIM = !DEMO_ANIM;
         this.render();
       });
     });
@@ -243,10 +242,10 @@ class ReefBotPanel extends HTMLElement {
     if (activeReal) {
       const activeTubes = activeTubeNumbers(model, chamberOperation(model).name, count);
       if (activeTubes.length) lockFront = activeTubes[0] - 1;
-    } else if (model.labDemoActive) {
+    } else if (model.demoAnimate) {
       lockFront = 0;
     }
-    const active = activeReal || model.labDemoActive;
+    const active = activeReal || model.demoAnimate;
     if (lockFront != null) state.tgt = lockFront;
 
     const ctx = canvas.getContext("2d");
@@ -519,7 +518,7 @@ function buildModel(hass, lastPressed) {
     vialCount,
     labMode: vialCount >= 9,
     labDemo: LAB_DEMO,
-    labDemoActive: LAB_DEMO && LAB_DEMO_ACTIVE,
+    demoAnimate: DEMO_ANIM,
     tests,
     configuredTests,
     rodi: componentModel(states, "rodi", ["rodi", "rodi tank", "ro tank"]),
@@ -1033,7 +1032,7 @@ function renderMachineLab(model) {
 // Komplett entfernbar: dieser Block, renderLabDemoToggle(), die [data-lab-demo*]-
 // Listener in render() und die Demo-Zweige in buildModel(). Siehe ha-parity.md Gap 4.
 let LAB_DEMO = false;
-let LAB_DEMO_ACTIVE = false;
+let DEMO_ANIM = false;
 const LAB_DEMO_TUBES = [
   ["RedSea Alk Pro", 16.4, 82], ["NO2/NO3 A", 12.8, 64], ["NO2/NO3 B", 12.8, 64],
   ["NO2/NO3 C", 12.2, 61], ["RedSea Ca A", 14.6, 73], ["RedSea Ca B", 14.2, 71],
@@ -1049,11 +1048,13 @@ const LAB_DEMO_TUBES = [
 
 function renderLabDemoToggle(model) {
   const on = model.labDemo;
+  const anim = model.demoAnimate;
+  const mode = on ? "Lab" : "V2";
   return `
     <div class="lab-demo-toggle">
       <button data-lab-demo class="${on ? "on" : ""}">${on ? "Lab-Vorschau: AN" : "Lab-Vorschau (Demo)"}</button>
-      ${on ? `<button data-lab-demo-active class="${model.labDemoActive ? "on" : ""}">${model.labDemoActive ? "Test-Animation: AN" : "Test-Animation"}</button>` : ""}
-      ${on ? `<span class="lab-demo-hint">Demo-Daten — kein echtes Gerät</span>` : ""}
+      <button data-lab-demo-active class="${anim ? "on" : ""}">${anim ? `Test-Animation (${mode}): AN` : `Test-Animation (${mode})`}</button>
+      ${on || anim ? `<span class="lab-demo-hint">Demo — kein echtes Gerät</span>` : ""}
     </div>
   `;
 }
@@ -1318,6 +1319,7 @@ function renderChamber(model) {
 }
 
 function isChamberActive(model) {
+  if (model && model.demoAnimate) return true; // TEMP: Test-Animation-Demo
   const operation = chamberOperation(model);
   return Boolean(operation.active);
 }
