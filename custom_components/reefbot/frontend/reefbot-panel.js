@@ -39,6 +39,7 @@ class ReefBotPanel extends HTMLElement {
       window.clearInterval(this._progressTimer);
       this._progressTimer = undefined;
     }
+    this.teardownLabCarousel();
   }
 
   set narrow(value) {
@@ -66,6 +67,7 @@ class ReefBotPanel extends HTMLElement {
             <section class="center-stack">
               ${renderTests(model)}
               ${renderOperationStrip(model)}
+              ${renderLabDemoToggle(model)}
               ${renderMachine(model)}
               ${renderMaintenance(model)}
             </section>
@@ -116,6 +118,22 @@ class ReefBotPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-confirm-start]").forEach((button) => {
       button.addEventListener("click", () => this.confirmPendingAction());
     });
+    this.shadowRoot.querySelectorAll("[data-lab-demo]").forEach((button) => {
+      button.addEventListener("click", () => {
+        LAB_DEMO = !LAB_DEMO;
+        LAB_DEMO_ACTIVE = false;
+        this._labState = { cur: 0, tgt: 0 };
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-lab-demo-active]").forEach((button) => {
+      button.addEventListener("click", () => {
+        LAB_DEMO_ACTIVE = !LAB_DEMO_ACTIVE;
+        this.render();
+      });
+    });
+    if (model.labMode) this.mountLabCarousel(model);
+    else this.teardownLabCarousel();
     this.updateMenuButton();
   }
 
@@ -201,10 +219,122 @@ class ReefBotPanel extends HTMLElement {
       button.hidden = !this._narrow;
     }
   }
+
+  mountLabCarousel(model) {
+    const canvas = this.shadowRoot.querySelector(".lab-canvas");
+    const stage = this.shadowRoot.querySelector(".lab-stage");
+    const labelsEl = this.shadowRoot.querySelector(".lab-labels");
+    if (!canvas || !stage || !labelsEl) return;
+    if (this._lab) {
+      window.cancelAnimationFrame(this._lab.raf);
+      this._lab.cleanup?.();
+    }
+
+    const tubes = model.tubes;
+    const count = tubes.length;
+    if (!this._labState || this._labCount !== count) {
+      this._labState = { cur: 0, tgt: 0 };
+      this._labCount = count;
+    }
+    const state = this._labState;
+
+    const activeReal = isChamberActive(model);
+    let lockFront = null;
+    if (activeReal) {
+      const activeTubes = activeTubeNumbers(model, chamberOperation(model).name, count);
+      if (activeTubes.length) lockFront = activeTubes[0] - 1;
+    } else if (model.labDemoActive) {
+      lockFront = 0;
+    }
+    const active = activeReal || model.labDemoActive;
+    if (lockFront != null) state.tgt = lockFront;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const resize = () => {
+      const width = canvas.clientWidth || stage.clientWidth || 600;
+      canvas.width = width * dpr;
+      canvas.height = 470 * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+
+    this.shadowRoot.querySelectorAll("[data-lab-rotate]").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (lockFront != null) return;
+        state.tgt += Number(btn.dataset.labRotate) || 0;
+      });
+    });
+    const tapEl = this.shadowRoot.querySelector("[data-lab-tap]");
+    if (tapEl) {
+      tapEl.addEventListener("click", () => {
+        if (lockFront != null) return;
+        const sel = ((Math.round(state.tgt) % count) + count) % count;
+        this._activeDialog = undefined;
+        this._activeVial = tubes[sel].number;
+        this.render();
+      });
+    }
+
+    let drag = false;
+    let lastX = 0;
+    const onDown = (event) => {
+      if (lockFront != null) return;
+      drag = true;
+      lastX = event.clientX;
+      stage.style.cursor = "grabbing";
+    };
+    const onMove = (event) => {
+      if (!drag) return;
+      const rx = Math.min(170, Math.max(140, (canvas.clientWidth || 600) * 0.37));
+      state.cur -= (event.clientX - lastX) / (rx * 0.9);
+      lastX = event.clientX;
+    };
+    const onUp = () => {
+      if (!drag) return;
+      drag = false;
+      stage.style.cursor = "grab";
+      state.tgt = Math.round(state.cur);
+    };
+    stage.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("resize", resize);
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("resize", resize);
+    };
+
+    const frame = (time) => {
+      if (!canvas.isConnected) {
+        cleanup();
+        return;
+      }
+      if (!drag) state.cur += (state.tgt - state.cur) * 0.18;
+      const sel = ((Math.round(state.tgt) % count) + count) % count;
+      drawLabCarousel(ctx, canvas.width / dpr, 470, tubes, state.cur, sel, time, active);
+      labelsEl.innerHTML = labNeighborLabels(tubes, sel);
+      this._lab.raf = window.requestAnimationFrame(frame);
+    };
+    this._lab = { raf: window.requestAnimationFrame(frame), cleanup };
+  }
+
+  teardownLabCarousel() {
+    if (this._lab) {
+      window.cancelAnimationFrame(this._lab.raf);
+      this._lab.cleanup?.();
+      this._lab = undefined;
+    }
+  }
 }
 
 customElements.define("reefbot-panel", ReefBotPanel);
 
+// 1:1 aus TestDurations.kt (App-Repo, data/TestDurations.kt). Matching
+// case-insensitiv "Name enthält Alias". Beim Ändern beide Dateien synchron
+// halten — siehe docs/ha-parity.md (Gap 3).
 const TEST_DURATIONS_MINUTES = [
   { names: ["RedSea Alkalinity", "RedSea Alkalinity Pro", "Red Sea Alkalinity Pro"], minutes: 26 },
   { names: ["RedSea Phosphate Pro Low Range", "RedSea PO4 Pro Low Range", "RedSea PO4 Pro Low Range 13 drops"], minutes: 57 },
@@ -250,19 +380,34 @@ const TEST_DURATIONS_MINUTES = [
   { names: ["Giesemann Phosphate"], minutes: 49 },
   { names: ["Giesemann Magnesium"], minutes: 59 },
   { names: ["Giesemann Alkalinity"], minutes: 48 },
-  { names: ["Giesemann Ammonia"], minutes: 59 },
-  { names: ["Giesmann Nitrite"], minutes: 20 },
-  { names: ["Giesmann Iron"], minutes: 40 },
-  { names: ["Giesmann Ammonium"], minutes: 60 },
-  { names: ["Giesemann Aquaristic Iodine", "Giesemann Aquaristic lodine"], minutes: 45 },
-  { names: ["Elos KH Wateranalysis"], minutes: 24 },
-  { names: ["Elos Cu Wateranalysis"], minutes: 37 },
-  { names: ["Elos Phosphate"], minutes: 35 },
-  { names: ["Elos Ammonium"], minutes: 52 },
+
+  // --- ReefBot Lab: zusätzliche Testkits (Quelle: "ReefbotLab reagents"-Sheet
+  //     von Reef Kinetics, Stand 2026-07). Der Lab unterstützt deutlich mehr
+  //     Kits als der V2. Dauer = Spalte "Test Duration(min)".
+  { names: ["API pH Wide Range", "API pH WIDE RANGE"], minutes: 25 },
+  { names: ["Elos KH Wateranalysis", "Elos KH", "Elos Alkalinity"], minutes: 24 },
+  { names: ["Elos Cu Wateranalysis", "Elos Copper", "Elos Cu"], minutes: 37 },
+  { names: ["Elos Phosphate", "Elos PO4"], minutes: 35 },
+  { names: ["Elos Ammonium", "Elos Ammonia"], minutes: 52 },
   { names: ["Elos pH"], minutes: 20 },
   { names: ["Elos GH"], minutes: 20 },
   { names: ["Elos Iron"], minutes: 40 },
-  { names: ["Elos NO2 wateranalysis"], minutes: 24 },
+  { names: ["Elos NO2 Wateranalysis", "Elos NO2", "Elos Nitrite"], minutes: 24 },
+  { names: ["Giesemann Ammonia", "Giesmann Ammonia"], minutes: 59 },
+  { names: ["Giesemann Ammonium", "Giesmann Ammonium"], minutes: 60 },
+  { names: ["Giesemann Nitrite", "Giesmann Nitrite"], minutes: 20 },
+  { names: ["Giesemann Iron", "Giesmann Iron"], minutes: 40 },
+  { names: ["Giesemann Aquaristic Iodine", "Giesemann Iodine"], minutes: 45 },
+  { names: ["Colombo Iodine"], minutes: 45 },
+  { names: ["Monitor Chlorine"], minutes: 24 },
+  { names: ["Monitor Nitrite"], minutes: 24 },
+  { names: ["Monitor Calcium Saltwater"], minutes: 37 },
+  { names: ["Monitor Calcium Freshwater"], minutes: 37 },
+  { names: ["Monitor Alkalinity Reef"], minutes: 35 },
+  { names: ["Monitor Total Alkalinity"], minutes: 35 },
+  { names: ["Monitor pH saltwater"], minutes: 24 },
+  { names: ["Monitor pH Freshwater"], minutes: 24 },
+  { names: ["Monitor Ammonia"], minutes: 37 },
   { names: ["NTLABS Phosphate Fresh"], minutes: 24 },
   { names: ["NTLABS Phosphate Marine"], minutes: 59 },
   { names: ["NTLABS Nitrate"], minutes: 48 },
@@ -273,21 +418,20 @@ const TEST_DURATIONS_MINUTES = [
   { names: ["NTLABS Alkalinity"], minutes: 36 },
   { names: ["NTLABS pH Marine"], minutes: 24 },
   { names: ["NTLABS pH Freshwater"], minutes: 24 },
-  { names: ["NTLABS General Hardness"], minutes: 37 },
+  { names: ["NTLABS General Hardness", "NTLABS GH"], minutes: 37 },
+  { names: ["Pentair Pool Alkalinity"], minutes: 48 },
+  { names: ["Poolmaster Chlorine"], minutes: 29 },
+  { names: ["Poolmaster Bromine"], minutes: 30 },
   { names: ["Aquaforest Alkalinity"], minutes: 41 },
   { names: ["JBL Alkalinity"], minutes: 37 },
-  { names: ["JBL General Hardness"], minutes: 20 },
+  { names: ["JBL General Hardness", "JBL GH"], minutes: 20 },
   { names: ["JBL Silicate"], minutes: 45 },
-  { names: ["JBL Carbon dioxide"], minutes: 37 },
+  { names: ["JBL Carbon dioxide", "JBL CO2"], minutes: 37 },
   { names: ["JBL Iron"], minutes: 37 },
   { names: ["JBL pH"], minutes: 37 },
   { names: ["H2Ocean Magnesium"], minutes: 59 },
   { names: ["H2Ocean Alkalinity"], minutes: 27 },
-  { names: ["Monitor Calcium Saltwater"], minutes: 37 },
-  { names: ["Monitor Calcium Freshwater"], minutes: 37 },
-  { names: ["Monitor Alkalinity Reef"], minutes: 35 },
-  { names: ["Monitor Total Alkalinity"], minutes: 35 },
-  { names: ["Monitor Ammonia"], minutes: 37 },
+  { names: ["Sera Chlorine"], minutes: 29 },
 ];
 
 function buildModel(hass, lastPressed) {
@@ -365,8 +509,17 @@ function buildModel(hass, lastPressed) {
       };
     });
 
+  const vialsNumberSensor = findReefBotByName(states, ["vials number", "anzahl vials", "vials"]);
+  const vialsNumber = numberValue(vialsNumberSensor?.state);
+  const realVialCount = Math.max(Number.isFinite(vialsNumber) ? vialsNumber : 0, tubes.length || 0);
+  const labTubes = LAB_DEMO ? LAB_DEMO_TUBES : tubes;
+  const vialCount = LAB_DEMO ? LAB_DEMO_TUBES.length : realVialCount;
   return {
-    tubes,
+    tubes: labTubes,
+    vialCount,
+    labMode: vialCount >= 9,
+    labDemo: LAB_DEMO,
+    labDemoActive: LAB_DEMO && LAB_DEMO_ACTIVE,
     tests,
     configuredTests,
     rodi: componentModel(states, "rodi", ["rodi", "rodi tank", "ro tank"]),
@@ -645,7 +798,269 @@ function renderOperationStrip(model) {
   `;
 }
 
+// ==== ReefBot Lab: 3D-Vial-Karussell (1:1-Port aus der App LabCarouselGraphic.kt) ====
+// Canvas-2.5D-Projektion: 12 Vials auf einer perspektivischen Ellipse, Oktagon-Turm
+// mit LED-Ring, versetzte Testkammer, Spritzen-Choreografie bei aktivem Test.
+// Aktiv ab model.labMode (vialCount >= 9 oder Demo-Vorschau).
+
+function labRR(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+function labOct(ctx, cx, cy, r, ryv) {
+  ctx.beginPath();
+  for (let k = 0; k < 8; k++) {
+    const a = Math.PI / 8 + k * Math.PI / 4;
+    const px = cx + r * Math.cos(a);
+    const py = cy + ryv * Math.sin(a);
+    if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+function labKF(t, pts) {
+  if (t <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    if (t <= pts[i][0]) {
+      const a = pts[i - 1], b = pts[i];
+      const f = (t - a[0]) / ((b[0] - a[0]) || 1);
+      return a[1] + (b[1] - a[1]) * f;
+    }
+  }
+  return pts[pts.length - 1][1];
+}
+
+function labVial(ctx, cx, baseY, s, tube, selected) {
+  const w = 28 * s, h = 66 * s, capH = 13 * s;
+  const left = cx - w / 2, top = baseY - h;
+  const al = Math.min(1, Math.max(0.5, 0.5 + 0.5 * s));
+  const r = 6 * s;
+  ctx.globalAlpha = al;
+  ctx.fillStyle = "#0B0D0E";
+  labRR(ctx, left, top, w, h, r); ctx.fill();
+  const fill = Math.min(0.92, Math.max(0.05, (Number(tube.percentage) || 0) / 100));
+  const lh = (h - capH) * fill;
+  ctx.fillStyle = tube.color || "#5c6470";
+  labRR(ctx, left + 3 * s, baseY - lh - 3 * s, w - 6 * s, lh, 5 * s); ctx.fill();
+  ctx.fillStyle = "#0E1416";
+  labRR(ctx, left, top, w, capH, r); ctx.fill();
+  ctx.strokeStyle = selected ? "#5FD7F7" : "#3A4A50";
+  ctx.lineWidth = selected ? 2.5 : 1.5;
+  labRR(ctx, left, top, w, h, r); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function labBadge(ctx, cx, cy, num, s, selected, alpha) {
+  const r = Math.max(8, 11 * s);
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "#0D252F";
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fill();
+  ctx.strokeStyle = selected ? "#5FD7F7" : "#2F5866";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+  ctx.fillStyle = "#DFF7FF";
+  ctx.font = "500 " + Math.max(9, 11 * s) + "px system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(String(num), cx, cy + 0.5);
+  ctx.globalAlpha = 1;
+}
+
+function labSyringe(ctx, cx, top, s, plunger) {
+  const blockW = 26 * s, blockH = 18 * s;
+  ctx.fillStyle = "#1D262B";
+  labRR(ctx, cx - blockW / 2, top, blockW, blockH, 5); ctx.fill();
+  const barW = 12 * s, barH = 52 * s, bt = top + blockH;
+  ctx.globalAlpha = 0.5; ctx.fillStyle = "#C5D8DC";
+  labRR(ctx, cx - barW / 2, bt, barW, barH, 6); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#8FB6C0"; ctx.lineWidth = 1.5;
+  labRR(ctx, cx - barW / 2, bt, barW, barH, 6); ctx.stroke();
+  const fh = (barH - 8) * plunger;
+  ctx.globalAlpha = 0.55; ctx.fillStyle = "#6CD7F1";
+  labRR(ctx, cx - barW / 2 + 2, bt + barH - fh - 4, barW - 4, fh, 5); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#C8DADE"; ctx.lineWidth = 2; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(cx, bt + barH); ctx.lineTo(cx, bt + barH + 26 * s); ctx.stroke();
+}
+
+function drawLabCarousel(ctx, W, H, tubes, rotation, selectedIndex, now, active) {
+  const count = tubes.length;
+  const cx = W / 2, ringCy = 262;
+  const rx = Math.min(170, Math.max(140, W * 0.37));
+  const ry = 74, sMin = 0.42, sMax = 1, step = 2 * Math.PI / count;
+  ctx.clearRect(0, 0, W, H);
+
+  const octR = rx + 18, octRyTop = 30, octRyBot = 34, capCy = 100;
+  const baseCy = ringCy + ry + 18, edgeX = octR * Math.cos(Math.PI / 8);
+  labOct(ctx, cx, baseCy, octR, octRyBot);
+  ctx.fillStyle = "#0C1113"; ctx.fill();
+  ctx.strokeStyle = "#2B3439"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = "#141B1E";
+  labRR(ctx, cx - edgeX - 6, capCy, 12, baseCy - capCy, 3); ctx.fill();
+  labRR(ctx, cx + edgeX - 6, capCy, 12, baseCy - capCy, 3); ctx.fill();
+  labOct(ctx, cx, capCy, octR, octRyTop);
+  ctx.fillStyle = "#12191C"; ctx.fill();
+  ctx.strokeStyle = "#30383D"; ctx.lineWidth = 2; ctx.stroke();
+  labOct(ctx, cx, capCy, octR, octRyTop);
+  ctx.strokeStyle = "rgba(47,135,199,.28)"; ctx.lineWidth = 12; ctx.stroke();
+  const lg = ctx.createLinearGradient(cx - octR, 0, cx + octR, 0);
+  lg.addColorStop(0, "#1F6DD0"); lg.addColorStop(0.5, "#4AA8FF"); lg.addColorStop(1, "#1F6DD0");
+  labOct(ctx, cx, capCy, octR * 0.97, octRyTop * 0.97);
+  ctx.strokeStyle = lg; ctx.lineWidth = 5; ctx.stroke();
+  ctx.fillStyle = "#0B1418";
+  ctx.beginPath(); ctx.ellipse(cx, capCy, octR * 0.62, 20, 0, 0, 7); ctx.fill();
+
+  const placed = tubes.map((t, i) => {
+    const th = (i - rotation) * step;
+    const fr = Math.cos(th);
+    return { i, x: cx + rx * Math.sin(th), by: ringCy + ry * fr, s: sMin + (sMax - sMin) * (fr + 1) / 2, fr };
+  }).sort((a, b) => a.fr - b.fr);
+  const alphaFor = (fr) => Math.min(1, Math.max(0.4, 0.45 + 0.55 * (fr + 1) / 2));
+
+  placed.filter((p) => p.fr < 0).forEach((p) => {
+    labVial(ctx, p.x, p.by, p.s, tubes[p.i], p.i === selectedIndex);
+    labBadge(ctx, p.x, p.by + 11 * p.s, tubes[p.i].number, p.s, p.i === selectedIndex, alphaFor(p.fr));
+  });
+
+  const chCx = cx + rx * (Math.sin(step) / 2);
+  const chW = 30, chH = 50, chLeft = chCx - chW / 2, chTop = 252, chBottom = chTop + chH;
+  const railY = 208, colTop = capCy + 36;
+  ctx.fillStyle = "#1A2226";
+  labRR(ctx, cx - 7, colTop, 14, railY - colTop + 16, 4); ctx.fill();
+  ctx.fillStyle = "#232B30";
+  labRR(ctx, cx - 6, railY - 5, (chCx + 4) - (cx - 6), 10, 3); ctx.fill();
+  ctx.fillStyle = "#10171A";
+  labRR(ctx, chLeft - 6, chTop - 10, chW + 12, chH + 16, 10); ctx.fill();
+  ctx.fillStyle = "#0B0D0E";
+  labRR(ctx, chLeft, chTop, chW, chH, 10); ctx.fill();
+  const liquidH = chH * 0.48, liquidTopY = chBottom - liquidH - 4;
+  const vg = ctx.createLinearGradient(0, liquidTopY, 0, liquidTopY + liquidH);
+  vg.addColorStop(0, "#87DEF1"); vg.addColorStop(1, "#1289A6");
+  ctx.fillStyle = vg;
+  labRR(ctx, chLeft + 4, liquidTopY, chW - 8, liquidH, 7); ctx.fill();
+  if (active) {
+    const stir = (now % 700) / 700 * 2 * Math.PI;
+    const sw = 18 * (0.25 + 0.75 * Math.abs(Math.cos(stir)));
+    ctx.fillStyle = "rgba(230,238,238,.78)";
+    labRR(ctx, chCx - sw / 2, chBottom - 12, sw, 3.5, 2); ctx.fill();
+  }
+  ctx.strokeStyle = "rgba(95,215,247,.5)"; ctx.lineWidth = 1.5;
+  labRR(ctx, chLeft, chTop, chW, chH, 10); ctx.stroke();
+
+  placed.filter((p) => p.fr >= 0).forEach((p) => {
+    labVial(ctx, p.x, p.by, p.s, tubes[p.i], p.i === selectedIndex);
+    labBadge(ctx, p.x, p.by + 11 * p.s, tubes[p.i].number, p.s, p.i === selectedIndex, alphaFor(p.fr));
+  });
+
+  if (active) {
+    const ph = now % 9000;
+    const armX = labKF(ph, [[0, 0], [3600, 0], [4400, 1], [8200, 1], [9000, 0]]);
+    const armDown = labKF(ph, [[0, 0], [900, 1], [3400, 1], [3900, 0], [4400, 0], [5000, 1], [8000, 1], [8400, 0], [9000, 0]]);
+    const plunger = labKF(ph, [[0, 0.15], [2000, 1], [5200, 1], [7200, 0.15], [9000, 0.15]]);
+    const drop = labKF(ph, [[0, 0], [5200, 0], [5650, 1], [5660, 0], [6150, 1], [6160, 0], [6650, 1], [6660, 0], [9000, 0]]);
+    const syS = 0.82, armCx = cx + armX * (chCx - cx), frontBaseY = ringCy + ry;
+    const vialInnerBottom = frontBaseY - 3;
+    const vialInnerTop = (frontBaseY - 66 * sMax) + 13 * sMax;
+    const vialInnerH = vialInnerBottom - vialInnerTop;
+    const vialTip = vialInnerBottom - 0.05 * vialInnerH;
+    const chamberTip = chTop + 10, restTip = railY + 34;
+    const targetDown = vialTip + (chamberTip - vialTip) * armX;
+    const tipY = restTip + (targetDown - restTip) * armDown;
+    ctx.fillStyle = "#2A343A";
+    labRR(ctx, armCx - 14, railY - 8, 28, 14, 4); ctx.fill();
+    const blockH = 18 * syS, barrelH = 52 * syS, needleH = 24 * syS;
+    const syTop = tipY - (blockH + barrelH + needleH);
+    ctx.strokeStyle = "#8FB6C0"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(armCx, railY); ctx.lineTo(armCx, syTop + 4); ctx.stroke();
+    labSyringe(ctx, armCx, syTop, syS, plunger);
+    if (drop > 0.01) {
+      const da = drop < 0.75 ? 1 : Math.max(0, (1 - drop) / 0.25);
+      ctx.globalAlpha = da; ctx.fillStyle = "#7EE2F9";
+      ctx.beginPath(); ctx.arc(armCx, tipY + 2 + drop * 15, 3.5, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+function labNeighborChip(tube, big) {
+  const slotSize = big ? "34px" : "24px";
+  const border = big ? "2.5px solid #66D7F7" : "1.5px solid #2F5866";
+  const numColor = big ? "#DFF7FF" : "#CFE6EE";
+  const textColor = big ? "#EDF7FA" : "#8FA3AB";
+  const weight = big ? "700" : "500";
+  const nameSize = big ? "13px" : "10px";
+  const numSize = big ? "16px" : "11px";
+  const maxW = big ? "160px" : "96px";
+  return `
+    <div class="lab-chip" style="max-width:${maxW};">
+      <div class="lab-chip-num" style="width:${slotSize};height:${slotSize};border:${border};color:${numColor};font-size:${numSize};font-weight:${weight};">${escapeHtml(tube.number)}</div>
+      <div class="lab-chip-name" style="color:${textColor};font-size:${nameSize};font-weight:${weight};">${escapeHtml(tube.shortName)}</div>
+    </div>`;
+}
+
+function labNeighborLabels(tubes, selectedIndex) {
+  const count = tubes.length;
+  const l = ((selectedIndex - 1) % count + count) % count;
+  const r = (selectedIndex + 1) % count;
+  return labNeighborChip(tubes[l], false) + labNeighborChip(tubes[selectedIndex], true) + labNeighborChip(tubes[r], false);
+}
+
+function renderMachineLab(model) {
+  return `
+    <section class="machine lab-machine">
+      <div class="lab-frame">
+        <div class="lab-stage">
+          <span class="lab-badge">REEFBOT LAB · ${model.tubes.length} VIALS</span>
+          <canvas class="lab-canvas"></canvas>
+          <button class="lab-arrow left" data-lab-rotate="-1" aria-label="Vorheriges Vial">&lsaquo;</button>
+          <button class="lab-arrow right" data-lab-rotate="1" aria-label="Nächstes Vial">&rsaquo;</button>
+          <div class="lab-tap" data-lab-tap title="Röhrchen öffnen"></div>
+          <div class="lab-labels"></div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+// ==== TEMP: Lab-Vorschau (Demo) — nur zum Testen ohne echtes Lab-Gerät.
+// Komplett entfernbar: dieser Block, renderLabDemoToggle(), die [data-lab-demo*]-
+// Listener in render() und die Demo-Zweige in buildModel(). Siehe ha-parity.md Gap 4.
+let LAB_DEMO = false;
+let LAB_DEMO_ACTIVE = false;
+const LAB_DEMO_TUBES = [
+  ["RedSea Alk Pro", 16.4, 82], ["NO2/NO3 A", 12.8, 64], ["NO2/NO3 B", 12.8, 64],
+  ["NO2/NO3 C", 12.2, 61], ["RedSea Ca A", 14.6, 73], ["RedSea Ca B", 14.2, 71],
+  ["Colombo PO4-1", 9.6, 48], ["Colombo PO4-2", 9.0, 45], ["Magnesium", 18.0, 90],
+  ["Eisen", 7.0, 35], ["Jod", 11.6, 58], ["Kalium", 13.2, 66],
+].map((row, idx) => {
+  const number = idx + 1;
+  return {
+    number, name: row[0], shortName: row[0], current: row[1], capacity: 20,
+    percentage: row[2], unit: "mL", color: chemicalColor("", number),
+  };
+});
+
+function renderLabDemoToggle(model) {
+  const on = model.labDemo;
+  return `
+    <div class="lab-demo-toggle">
+      <button data-lab-demo class="${on ? "on" : ""}">${on ? "Lab-Vorschau: AN" : "Lab-Vorschau (Demo)"}</button>
+      ${on ? `<button data-lab-demo-active class="${model.labDemoActive ? "on" : ""}">${model.labDemoActive ? "Test-Animation: AN" : "Test-Animation"}</button>` : ""}
+      ${on ? `<span class="lab-demo-hint">Demo-Daten — kein echtes Gerät</span>` : ""}
+    </div>
+  `;
+}
+// ==== /TEMP ====
+
 function renderMachine(model) {
+  if (model.labMode) return renderMachineLab(model);
   const vialCount = Math.max(8, model.tubes.length || 8);
   const totalSlots = vialCount + 1;
   const tubes = Array.from({ length: vialCount }, (_, index) => model.tubes[index] || emptyTube(index + 1));
@@ -2125,6 +2540,122 @@ const styles = `
     white-space: nowrap;
   }
 
+  .lab-machine {
+    min-height: 0;
+    overflow: visible;
+  }
+  .lab-demo-toggle {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 0 0 8px;
+  }
+  .lab-demo-toggle button {
+    background: #132027;
+    color: #8fb6c0;
+    border: 1px solid #2f4a54;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .lab-demo-toggle button.on {
+    background: #0c2c1a;
+    color: #79e3a6;
+    border-color: #2f7a52;
+  }
+  .lab-demo-hint {
+    color: #7f9299;
+    font-size: 11px;
+  }
+  .lab-frame {
+    position: relative;
+    width: min(100%, 640px);
+    height: 470px;
+    margin: 0 auto;
+    border-radius: 14px;
+    background: #0c1113;
+    border: 10px solid #30383d;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 54px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+  .lab-stage {
+    position: absolute;
+    inset: 0;
+  }
+  .lab-badge {
+    position: absolute;
+    top: 10px;
+    left: 16px;
+    color: #5fd7f7;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    z-index: 4;
+    pointer-events: none;
+  }
+  .lab-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: grab;
+  }
+  .lab-arrow {
+    position: absolute;
+    top: 176px;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: #0c1c22;
+    border: 1.5px solid #3a5560;
+    color: #5fd7f7;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 4;
+  }
+  .lab-arrow.left { left: 8px; }
+  .lab-arrow.right { right: 8px; }
+  .lab-tap {
+    position: absolute;
+    left: 50%;
+    top: 258px;
+    transform: translateX(-50%);
+    width: 48px;
+    height: 84px;
+    cursor: pointer;
+    z-index: 3;
+  }
+  .lab-labels {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 8px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 16px;
+    pointer-events: none;
+  }
+  .lab-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .lab-chip-num {
+    border-radius: 50%;
+    background: #0d252f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .lab-chip-name {
+    text-align: center;
+    line-height: 1.15;
+  }
   .machine {
     min-height: 510px;
     overflow-x: auto;
