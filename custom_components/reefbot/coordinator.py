@@ -56,6 +56,39 @@ class ReefBotData:
         return self.devices[0] if self.devices else None
 
     @property
+    def vial_count(self) -> int:
+        """Number of reagent vials/tubes (8 = ReefBot V2, 12 = ReefBot Lab).
+
+        Read from the device payload's ``VialsNumber`` (confirmed present on the
+        V2, where it reads 8). Falls back to 8 when absent/unparseable and is
+        clamped to 8..16 so a bogus value can neither remove the eight V2 tube
+        sensors nor spawn a runaway number of entities.
+        """
+        device = self.device or {}
+        raw: Any = None
+        for key in ("VialsNumber", "vialsNumber", "VialCount", "vialCount"):
+            value = device.get(key)
+            if value not in (None, ""):
+                raw = value
+                break
+        try:
+            count = int(float(raw))
+        except (TypeError, ValueError):
+            return 8
+        if count < 1:
+            return 8
+        return max(8, min(16, count))
+
+    @property
+    def model_name(self) -> str:
+        """Human-readable device model.
+
+        Inferred from the (reliable) vial count rather than an unconfirmed
+        payload model string, so the V2 label stays exactly "ReefBot V2".
+        """
+        return "ReefBot Lab" if self.vial_count >= 9 else "ReefBot V2"
+
+    @property
     def tank(self) -> dict[str, Any] | None:
         """Return the configured tank, or the first tank."""
         return self.tanks[0] if self.tanks else None

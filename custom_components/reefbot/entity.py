@@ -33,10 +33,11 @@ class ReefBotEntity(CoordinatorEntity[ReefBotCoordinator]):
         name = _first_present(device, ("Name", "name")) or "ReefBot"
 
         identifier = str(serial or device_id or self.coordinator.entry.entry_id)
+        model = self.coordinator.data.model_name if self.coordinator.data else "ReefBot V2"
         info: DeviceInfo = {
             "identifiers": {(DOMAIN, identifier)},
             "manufacturer": "Reef Kinetics",
-            "model": "ReefBot V2",
+            "model": model,
             "name": str(name),
         }
         if serial is not None:

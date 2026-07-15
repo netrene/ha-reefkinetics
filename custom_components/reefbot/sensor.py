@@ -85,7 +85,10 @@ async def async_setup_entry(
         ReefBotMaintenanceComponentSensor(
             coordinator, "rodi", "RODI", ("rodi", "rodi tank", "ro tank")
         ),
-        *[ReefBotTubeSensor(coordinator, tube_number) for tube_number in range(1, 9)],
+        *[
+            ReefBotTubeSensor(coordinator, tube_number)
+            for tube_number in range(1, (coordinator.data.vial_count if coordinator.data else 8) + 1)
+        ],
     ]
     async_add_entities(static_entities)
 
