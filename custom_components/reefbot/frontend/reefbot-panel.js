@@ -9,12 +9,14 @@ class ReefBotPanel extends HTMLElement {
     this._confirmAction = undefined;
     this._activeDialog = undefined;
     this._activeVial = undefined;
+    this._maintenance = false;
+    this._maintenanceView = "carousel";
   }
 
   set hass(hass) {
     this._hass = hass;
     const now = Date.now();
-    let refreshInterval = this._activeVial ? 60000 : this._activeDialog || this._confirmAction ? 15000 : 3000;
+    let refreshInterval = this._activeVial || this._maintenance ? 60000 : this._activeDialog || this._confirmAction ? 15000 : 3000;
     if (this._activeVial && isChamberActive(buildModel(hass, this._lastPressed))) {
       this._activeVial = undefined;
       refreshInterval = 0;
@@ -40,6 +42,7 @@ class ReefBotPanel extends HTMLElement {
       this._progressTimer = undefined;
     }
     this.teardownLabCarousel();
+    this.teardownMaintenanceCarousel();
   }
 
   set narrow(value) {
@@ -69,10 +72,12 @@ class ReefBotPanel extends HTMLElement {
               ${renderOperationStrip(model)}
               ${renderLabDemoToggle(model)}
               ${renderMachine(model)}
+              ${renderMaintenanceEntry(model)}
               ${renderMaintenance(model)}
             </section>
           </section>
         </section>
+        ${renderMaintenanceOverlay(model, this._maintenance, this._maintenanceView)}
         ${renderConfirmDialog(this._confirmAction)}
         ${renderAlarmDialog(model, this._activeDialog === "alarms")}
         ${renderVialDialog(model, this._activeVial)}
@@ -131,8 +136,31 @@ class ReefBotPanel extends HTMLElement {
         this.render();
       });
     });
+    this.shadowRoot.querySelectorAll("[data-open-maintenance]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._activeVial = undefined;
+        this._activeDialog = undefined;
+        this._maintenance = true;
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-close-maintenance]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._maintenance = false;
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-maint-view]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._maintenanceView = button.dataset.maintView;
+        this.render();
+      });
+    });
     if (model.labMode) this.mountLabCarousel(model);
     else this.teardownLabCarousel();
+    if (this._maintenance && this._maintenanceView !== "list") this.mountMaintenanceCarousel(model);
+    else this.teardownMaintenanceCarousel();
     this.updateMenuButton();
   }
 
@@ -325,6 +353,124 @@ class ReefBotPanel extends HTMLElement {
       window.cancelAnimationFrame(this._lab.raf);
       this._lab.cleanup?.();
       this._lab = undefined;
+    }
+  }
+
+  mountMaintenanceCarousel(model) {
+    const canvas = this.shadowRoot.querySelector(".maint-canvas");
+    const stage = this.shadowRoot.querySelector(".maint-stage");
+    if (!canvas || !stage) return;
+    if (this._maint) {
+      window.cancelAnimationFrame(this._maint.raf);
+      this._maint.cleanup?.();
+    }
+
+    const tubes = model.tubes;
+    const count = tubes.length;
+    if (!this._maintState || this._maintCount !== count) {
+      this._maintState = { cur: 0, tgt: 0 };
+      this._maintCount = count;
+    }
+    const state = this._maintState;
+    const selTube = () => tubes[((Math.round(state.tgt) % count) + count) % count];
+
+    const ctx = canvas.getContext("2d");
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const resize = () => {
+      const width = canvas.clientWidth || stage.clientWidth || 480;
+      const height = canvas.clientHeight || 300;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+
+    const nameEl = this.shadowRoot.querySelector(".maint-front-name");
+    const metaEl = this.shadowRoot.querySelector(".maint-front-meta");
+    const refillBtn = this.shadowRoot.querySelector("[data-maint-refill]");
+    const frontEl = this.shadowRoot.querySelector("[data-maint-vialtap]");
+
+    this.shadowRoot.querySelectorAll("[data-maint-rotate]").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        state.tgt += Number(btn.dataset.maintRotate) || 0;
+      });
+    });
+    if (frontEl) {
+      frontEl.addEventListener("click", (event) => {
+        if (event.target?.closest?.("[data-maint-refill]")) return;
+        const tube = selTube();
+        this._activeDialog = undefined;
+        this._activeVial = tube.number;
+        this.render();
+      });
+    }
+    if (refillBtn) {
+      refillBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const tube = selTube();
+        if (!tube.refillButton) return;
+        this._activeVial = undefined;
+        this._confirmAction = {
+          entityId: tube.refillButton.entity_id,
+          name: `Röhrchen ${tube.number} auffüllen: ${tube.shortName}`,
+          kind: "refill",
+        };
+        this.render();
+      });
+    }
+
+    let drag = false;
+    let lastX = 0;
+    const onDown = (event) => {
+      drag = true;
+      lastX = event.clientX;
+      stage.style.cursor = "grabbing";
+    };
+    const onMove = (event) => {
+      if (!drag) return;
+      const rx = Math.min((canvas.clientWidth || 480) * 0.33, 150);
+      state.cur -= (event.clientX - lastX) / (rx * 0.9);
+      lastX = event.clientX;
+    };
+    const onUp = () => {
+      if (!drag) return;
+      drag = false;
+      stage.style.cursor = "grab";
+      state.tgt = Math.round(state.cur);
+    };
+    stage.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("resize", resize);
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("resize", resize);
+    };
+
+    const frame = () => {
+      if (!canvas.isConnected) {
+        cleanup();
+        return;
+      }
+      if (!drag) state.cur += (state.tgt - state.cur) * 0.18;
+      const sel = ((Math.round(state.tgt) % count) + count) % count;
+      drawMaintenanceCarousel(ctx, canvas.width / dpr, canvas.height / dpr, tubes, state.cur, sel);
+      const tube = tubes[sel];
+      if (nameEl) nameEl.textContent = `${tube.number} · ${tube.shortName}`;
+      if (metaEl) metaEl.textContent = `${formatNumber(tube.current)} / ${formatNumber(tube.capacity)} ${tube.unit} · ${maintFillPct(tube)}%`;
+      if (refillBtn) refillBtn.disabled = !tube.refillButton;
+      this._maint.raf = window.requestAnimationFrame(frame);
+    };
+    this._maint = { raf: window.requestAnimationFrame(frame), cleanup };
+  }
+
+  teardownMaintenanceCarousel() {
+    if (this._maint) {
+      window.cancelAnimationFrame(this._maint.raf);
+      this._maint.cleanup?.();
+      this._maint = undefined;
     }
   }
 }
@@ -1059,6 +1205,107 @@ function renderLabDemoToggle(model) {
   `;
 }
 // ==== /TEMP ====
+
+// ==== Reagenzien-Wartungsmodus: vereinfachtes Karussell + Listenansicht ====
+// Overlay, das per Tap aufs Gerät geöffnet wird (nur wenn kein Test läuft).
+// Zeigt nur die Fläschchen mit Name/Füllstand/Kapazität. Refill direkt im
+// Karussell (über den bestehenden Confirm-Dialog) oder Tap → bestehendes
+// Vial-Popup. Funktioniert für V2 (8) und Lab (12) gleich.
+
+function maintFillPct(tube) {
+  return Math.round(Math.min(100, Math.max(0, Number(tube.percentage) || 0)));
+}
+
+function renderMaintenanceEntry(model) {
+  if (isChamberActive(model)) return "";
+  return `
+    <div class="maint-entry">
+      <button data-open-maintenance>
+        <ha-icon icon="mdi:flask-outline"></ha-icon>
+        <span>Reagenzien-Wartung</span>
+      </button>
+    </div>
+  `;
+}
+
+function renderMaintenanceList(tubes) {
+  return `
+    <div class="maint-list">
+      ${tubes.map((tube) => {
+        const pct = maintFillPct(tube);
+        const refillLabel = `Röhrchen ${tube.number} auffüllen: ${tube.shortName}`;
+        return `
+        <div class="maint-row ${pct <= 20 ? "low" : ""}" data-vial-open="${tube.number}">
+          <span class="maint-row-num">${escapeHtml(tube.number)}</span>
+          <div class="maint-row-main">
+            <div class="maint-row-name">${escapeHtml(tube.shortName)}</div>
+            <div class="maint-bar"><span style="width:${pct}%; background:${tube.color};"></span></div>
+          </div>
+          <div class="maint-row-vals">
+            <b>${formatNumber(tube.current)}/${formatNumber(tube.capacity)} ${escapeHtml(tube.unit)}</b>
+            <small>${pct}%</small>
+          </div>
+          ${tube.refillButton
+            ? `<button class="maint-row-refill" data-press="${tube.refillButton.entity_id}" data-kind="refill" data-label="${escapeHtml(refillLabel)}">Auffüllen</button>`
+            : `<button class="maint-row-refill" disabled>—</button>`}
+        </div>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderMaintenanceOverlay(model, open, view) {
+  if (!open) return "";
+  const tubes = model.tubes;
+  const isList = view === "list";
+  const title = model.labMode ? "Reagenzien · Lab" : "Reagenzien";
+  return `
+    <div class="dialog-backdrop maint-backdrop" data-close-maintenance>
+      <section class="dialog-card maint-dialog" role="dialog" aria-modal="true" aria-label="Reagenzien-Wartung" data-dialog-card>
+        <div class="maint-toolbar">
+          <h2>${escapeHtml(title)}</h2>
+          <div class="maint-views">
+            <button data-maint-view="carousel" class="${!isList ? "on" : ""}">Karussell</button>
+            <button data-maint-view="list" class="${isList ? "on" : ""}">Liste</button>
+          </div>
+          <button class="icon-close" data-close-maintenance title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
+        </div>
+        ${isList ? renderMaintenanceList(tubes) : `
+          <div class="maint-stage">
+            <canvas class="maint-canvas"></canvas>
+            <button class="maint-arrow left" data-maint-rotate="-1" aria-label="Vorheriges Röhrchen">&lsaquo;</button>
+            <button class="maint-arrow right" data-maint-rotate="1" aria-label="Nächstes Röhrchen">&rsaquo;</button>
+          </div>
+          <div class="maint-front" data-maint-vialtap title="Details öffnen">
+            <div class="maint-front-info">
+              <div class="maint-front-name">—</div>
+              <div class="maint-front-meta">—</div>
+            </div>
+            <button class="maint-refill" data-maint-refill>Auffüllen</button>
+          </div>
+          <p class="maint-hint">Drehen mit ‹ › oder Wischen · Tippen für Details</p>
+        `}
+      </section>
+    </div>
+  `;
+}
+
+function drawMaintenanceCarousel(ctx, W, H, tubes, rotation, selectedIndex) {
+  const count = tubes.length;
+  const cx = W / 2, ringCy = H * 0.5;
+  const rx = Math.min(W * 0.33, 150), ry = 48, sMin = 0.5, sMax = 1.18;
+  const step = 2 * Math.PI / count;
+  ctx.clearRect(0, 0, W, H);
+  const placed = tubes.map((t, i) => {
+    const th = (i - rotation) * step;
+    const fr = Math.cos(th);
+    return { i, x: cx + rx * Math.sin(th), by: ringCy + ry * fr, s: sMin + (sMax - sMin) * (fr + 1) / 2, fr };
+  }).sort((a, b) => a.fr - b.fr);
+  placed.forEach((p) => {
+    labVial(ctx, p.x, p.by, p.s, tubes[p.i], p.i === selectedIndex);
+    labBadge(ctx, p.x, p.by + 11 * p.s, tubes[p.i].number, p.s, p.i === selectedIndex, Math.min(1, Math.max(0.45, 0.5 + 0.5 * (p.fr + 1) / 2)));
+  });
+}
 
 function renderMachine(model) {
   if (model.labMode) return renderMachineLab(model);
@@ -2658,6 +2905,169 @@ const styles = `
     text-align: center;
     line-height: 1.15;
   }
+  .maint-entry {
+    display: flex;
+    justify-content: center;
+    margin: 10px 0 2px;
+  }
+  .maint-entry button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #132027;
+    color: #9edff0;
+    border: 1px solid #2f4a54;
+    border-radius: 999px;
+    padding: 9px 18px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .maint-entry button:hover { background: #17313b; }
+  .maint-entry ha-icon { --mdc-icon-size: 20px; }
+  .maint-dialog {
+    width: min(600px, 100%);
+    max-height: min(88vh, 760px);
+  }
+  .maint-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .maint-toolbar h2 { margin: 0; font-size: 20px; flex: 0 0 auto; }
+  .maint-views {
+    display: inline-flex;
+    margin-left: auto;
+    background: #0e181c;
+    border: 1px solid #2a3a41;
+    border-radius: 999px;
+    padding: 3px;
+  }
+  .maint-views button {
+    border: none;
+    background: transparent;
+    color: #9db4bc;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .maint-views button.on { background: #14384a; color: #cdeefb; }
+  .maint-stage {
+    position: relative;
+    height: 300px;
+    cursor: grab;
+    touch-action: none;
+  }
+  .maint-canvas { width: 100%; height: 100%; display: block; }
+  .maint-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #0c1c22;
+    border: 1.5px solid #3a5560;
+    color: #5fd7f7;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .maint-arrow.left { left: 4px; }
+  .maint-arrow.right { right: 4px; }
+  .maint-front {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 6px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(8, 18, 21, 0.7);
+    border: 1px solid rgba(102, 215, 247, 0.16);
+    cursor: pointer;
+  }
+  .maint-front-info { min-width: 0; flex: 1; }
+  .maint-front-name {
+    font-size: 15px;
+    font-weight: 500;
+    color: #edf7fa;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .maint-front-meta { font-size: 13px; color: #9db4bc; margin-top: 2px; }
+  .maint-refill {
+    flex: 0 0 auto;
+    background: #132027;
+    color: #ffd7c8;
+    border: 1px solid rgba(255, 150, 120, 0.4);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .maint-refill:disabled { opacity: 0.4; cursor: default; }
+  .maint-hint { margin: 8px 0 0; text-align: center; color: #7f9299; font-size: 12px; }
+  .maint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+  }
+  .maint-row {
+    display: grid;
+    grid-template-columns: 30px 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(8, 18, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+  }
+  .maint-row:hover { border-color: rgba(102, 215, 247, 0.28); }
+  .maint-row.low { border-color: rgba(255, 170, 120, 0.4); }
+  .maint-row-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #0d252f;
+    border: 1px solid #2f5866;
+    color: #cfe6ee;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+  }
+  .maint-row-main { min-width: 0; }
+  .maint-row-name {
+    font-size: 14px;
+    color: #edf7fa;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .maint-bar {
+    margin-top: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+  .maint-bar span { display: block; height: 100%; border-radius: 999px; }
+  .maint-row-vals { text-align: right; white-space: nowrap; }
+  .maint-row-vals b { display: block; font-size: 13px; color: #edf7fa; font-weight: 500; }
+  .maint-row-vals small { color: #9db4bc; font-size: 11px; }
+  .maint-row-refill {
+    background: #132027;
+    color: #ffd7c8;
+    border: 1px solid rgba(255, 150, 120, 0.34);
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .maint-row-refill:disabled { opacity: 0.35; cursor: default; border-color: rgba(255,255,255,0.1); color: #7f9299; }
   .machine {
     min-height: 510px;
     overflow-x: auto;
