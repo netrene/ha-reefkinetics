@@ -1642,20 +1642,36 @@ function renderConfigEntry(model) {
 function renderConfigOverlay(model, open, state) {
   if (!open || !state) return "";
   const free = cfgFreeSlots(state);
+  const used = state.vialCount - free.length;
+  const full = free.length === 0;
   const addable = cfgAddable(state);
-  const kitCards = state.kits.length
-    ? state.kits.map((k) => `
-      <div class="cfg-kit" style="border-left-color:${k.colorHex};">
-        <div class="cfg-kit-head">
-          <span class="cfg-kit-name">${escapeHtml(k.displayName)}</span>
-          <button class="cfg-kit-remove" data-config-remove="${escapeHtml(k.operationId)}" title="Entfernen">✕</button>
-        </div>
-        ${k.parameters && k.parameters.length ? `<div class="cfg-kit-params">${k.parameters.map((p) => escapeHtml(cfgParamDe(p))).join(" · ")}</div>` : ""}
-        <div class="cfg-kit-reagents">
-          ${k.reagents.map((r) => `<span class="cfg-reagent"><b>T${r.slot}</b>${r.shortLabel ? `<i>${escapeHtml(r.shortLabel)}</i>` : ""}<em>${escapeHtml(r.chemicalName)}</em></span>`).join("")}
-        </div>
-      </div>`).join("")
+  const kitGroups = state.kits.length
+    ? state.kits.map((k) => {
+        const params = (k.parameters && k.parameters.length ? k.parameters : (k.parameterName ? [k.parameterName] : []))
+          .map((p) => escapeHtml(cfgParamDe(p))).join(" · ");
+        const vials = k.reagents.map((r) => `
+          <div class="cfg-vialcol" title="Tube ${escapeHtml(r.slot)} · ${escapeHtml(r.chemicalName)}">
+            <div class="cfg-vial"><span class="cfg-vial-fill" style="background:${k.colorHex};"></span><span class="cfg-vial-label">${escapeHtml(r.shortLabel || r.slot)}</span></div>
+            <span class="cfg-vial-num">${escapeHtml(r.slot)}</span>
+          </div>`).join("");
+        return `
+          <div class="cfg-kitgroup">
+            <div class="cfg-kitcard" style="border-color:${k.colorHex};">
+              <span class="cfg-dot" style="background:${k.colorHex};"></span>
+              <div class="cfg-kitmeta">
+                <div class="cfg-kitname">${escapeHtml(k.displayName)}</div>
+                ${params ? `<div class="cfg-kitparam" style="color:${k.colorHex};">${params}</div>` : ""}
+              </div>
+              <button class="cfg-kitremove" data-config-remove="${escapeHtml(k.operationId)}" title="Entfernen">✕</button>
+            </div>
+            <div class="cfg-bracket" style="background:${k.colorHex};"></div>
+            <div class="cfg-vialrow">${vials}</div>
+          </div>`;
+      }).join("")
     : `<p class="cfg-empty">Noch keine Tests konfiguriert.</p>`;
+  const freeRow = free.length
+    ? `<div class="cfg-freerow">${free.map((s) => `<div class="cfg-vialcol"><div class="cfg-vial empty"></div><span class="cfg-vial-num">${s}</span></div>`).join("")}</div>`
+    : "";
   const addList = addable.length
     ? addable.map((kit) => `
       <button class="cfg-add-kit" data-config-add="${escapeHtml(kit.operationId)}">
@@ -1668,14 +1684,17 @@ function renderConfigOverlay(model, open, state) {
       <section class="dialog-card cfg-dialog" role="dialog" aria-modal="true" aria-label="Test-Konfiguration" data-dialog-card>
         <div class="cfg-toolbar">
           <h2>Test-Konfiguration</h2>
-          <span class="cfg-free">${free.length}/${state.vialCount} Tubes frei</span>
+          <span class="cfg-free ${full ? "full" : ""}">${used}/${state.vialCount}</span>
           <button class="icon-close" data-close-config title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
         </div>
         <div class="cfg-section-title">Konfigurierte Tests</div>
-        <div class="cfg-kits">${kitCards}</div>
+        <div class="cfg-machine">
+          <div class="cfg-kitflow">${kitGroups}</div>
+          ${freeRow}
+        </div>
         <div class="cfg-section-title">Test hinzufügen</div>
         <div class="cfg-addlist">${addList}</div>
-        <p class="cfg-hint">Reagenzien bleiben als Kit zusammen. Beim Speichern wird die komplette Belegung ans Gerät geschrieben.</p>
+        <p class="cfg-hint">Kürzel im Fläschchen, Tube-Nr. darunter. Reagenzien bleiben als Kit zusammen. Beim Speichern wird die komplette Belegung ans Gerät geschrieben.</p>
         <div class="dialog-actions">
           <button class="ghost" data-close-config>Abbrechen</button>
           <button class="primary" data-config-save>Speichern</button>
@@ -3486,10 +3505,15 @@ const styles = `
   .cfg-empty { color: #9db4bc; font-size: 13px; margin: 2px 0 4px; }
   .cfg-free {
     margin-left: auto;
-    color: #9db4bc;
     font-size: 12px;
     white-space: nowrap;
+    padding: 3px 10px;
+    border-radius: 11px;
+    background: #0d252f;
+    border: 1px solid #2f5866;
+    color: #cfe6ee;
   }
+  .cfg-free.full { background: #2a1315; border-color: #7a2d2d; color: #f0a0a0; }
   .cfg-section-title {
     color: #90a2aa;
     font-size: 12px;
@@ -3497,50 +3521,79 @@ const styles = `
     letter-spacing: 0.08em;
     margin: 12px 0 6px;
   }
-  .cfg-kits {
+  .cfg-machine {
+    background: #0c1416;
+    border: 1px solid #243138;
+    border-radius: 14px;
+    padding: 14px 10px;
+  }
+  .cfg-kitflow {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 14px 14px;
+    align-items: flex-start;
   }
-  .cfg-kit {
-    background: rgba(8, 18, 21, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-left: 3px solid #5fd7f7;
-    border-radius: 10px;
-    padding: 10px 12px;
-  }
-  .cfg-kit-head {
+  .cfg-kitgroup { display: flex; flex-direction: column; align-items: center; }
+  .cfg-kitcard {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+    align-items: flex-start;
+    gap: 6px;
+    background: #101619;
+    border: 1px solid #5fd7f7;
+    border-radius: 8px;
+    padding: 5px 6px 5px 8px;
   }
-  .cfg-kit-name { font-size: 14px; font-weight: 500; color: #edf7fa; }
-  .cfg-kit-remove {
+  .cfg-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex: 0 0 auto; }
+  .cfg-kitmeta { min-width: 0; max-width: 150px; }
+  .cfg-kitname {
+    color: #ddeaee;
+    font-size: 12px;
+    line-height: 1.15;
+    font-weight: 500;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 28px;
+  }
+  .cfg-kitparam { font-size: 10px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-kitremove {
     background: transparent;
     border: none;
-    color: #d88;
-    font-size: 15px;
+    color: #7a8b92;
+    font-size: 12px;
     cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 6px;
+    padding: 0 2px;
+    flex: 0 0 auto;
+    line-height: 1;
   }
-  .cfg-kit-remove:hover { background: rgba(255, 120, 120, 0.14); }
-  .cfg-kit-params { color: #8fb6c0; font-size: 12px; margin-top: 2px; }
-  .cfg-kit-reagents { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .cfg-reagent {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 6px;
-    padding: 3px 8px;
-    font-size: 11px;
-    color: #cfe6ee;
+  .cfg-kitremove:hover { color: #e28; }
+  .cfg-bracket { width: 2px; height: 8px; opacity: 0.6; }
+  .cfg-vialrow { display: flex; gap: 6px; }
+  .cfg-freerow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .cfg-vialcol { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .cfg-vial {
+    position: relative;
+    width: 30px;
+    height: 58px;
+    background: #0b0d0e;
+    border: 1px solid #2a363b;
+    border-radius: 5px;
+    overflow: hidden;
   }
-  .cfg-reagent b { color: #66d7f7; font-weight: 500; }
-  .cfg-reagent i { color: #edf7fa; font-style: normal; font-weight: 500; }
-  .cfg-reagent em { color: #9db4bc; font-style: normal; }
+  .cfg-vial.empty { border-style: dashed; border-color: #33424a; }
+  .cfg-vial-fill { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 30px; border-radius: 3px; }
+  .cfg-vial-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 8px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: #08111a;
+  }
+  .cfg-vial-num { color: #9fb0b8; font-size: 10px; line-height: 1; }
   .cfg-addlist { display: flex; flex-direction: column; gap: 6px; }
   .cfg-add-kit {
     display: flex;
