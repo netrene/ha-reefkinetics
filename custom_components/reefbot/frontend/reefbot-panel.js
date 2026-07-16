@@ -1464,6 +1464,21 @@ function cfgCommonBrandName(names) {
   if (brand.length >= 3) return brand;
   return cfgCleanKitName(names.reduce((a, b) => (b.length > a.length ? b : a), names[0]));
 }
+// Parameter-Labels auf Deutsch (nur Anzeige, wie in der App). Fallback = Original.
+const CFG_PARAM_DE = {
+  alkalinity: "Alkalinität", kh: "KH", "carbonate hardness": "Karbonathärte",
+  nitrate: "Nitrat", nitrite: "Nitrit", phosphate: "Phosphat", calcium: "Calcium",
+  magnesium: "Magnesium", copper: "Kupfer", iodine: "Jod", ammonia: "Ammoniak",
+  ammonium: "Ammonium", ph: "pH", potassium: "Kalium", iron: "Eisen",
+  silicate: "Silikat", chlorine: "Chlor", bromine: "Brom", gh: "GH",
+  "general hardness": "Gesamthärte", oxygen: "Sauerstoff", salinity: "Salinität",
+  "carbon dioxide": "CO₂", co2: "CO₂", strontium: "Strontium", boron: "Bor",
+  fluoride: "Fluorid", nickel: "Nickel", manganese: "Mangan",
+};
+function cfgParamDe(name) {
+  const key = String(name || "").trim().toLowerCase();
+  return CFG_PARAM_DE[key] || String(name || "");
+}
 function cfgKitColor(parameterName, fallbackIndex) {
   const key = (parameterName || "").trim().toLowerCase();
   let idx;
@@ -1635,7 +1650,7 @@ function renderConfigOverlay(model, open, state) {
           <span class="cfg-kit-name">${escapeHtml(k.displayName)}</span>
           <button class="cfg-kit-remove" data-config-remove="${escapeHtml(k.operationId)}" title="Entfernen">✕</button>
         </div>
-        ${k.parameters && k.parameters.length ? `<div class="cfg-kit-params">${k.parameters.map((p) => escapeHtml(p)).join(" · ")}</div>` : ""}
+        ${k.parameters && k.parameters.length ? `<div class="cfg-kit-params">${k.parameters.map((p) => escapeHtml(cfgParamDe(p))).join(" · ")}</div>` : ""}
         <div class="cfg-kit-reagents">
           ${k.reagents.map((r) => `<span class="cfg-reagent"><b>T${r.slot}</b>${r.shortLabel ? `<i>${escapeHtml(r.shortLabel)}</i>` : ""}<em>${escapeHtml(r.chemicalName)}</em></span>`).join("")}
         </div>
@@ -1645,7 +1660,7 @@ function renderConfigOverlay(model, open, state) {
     ? addable.map((kit) => `
       <button class="cfg-add-kit" data-config-add="${escapeHtml(kit.operationId)}">
         <span class="cfg-add-name">${escapeHtml(cfgCleanKitName(kit.displayName))}</span>
-        <span class="cfg-add-meta">${kit.parameterName ? escapeHtml(kit.parameterName) + " · " : ""}${kit.reagentChemicalIds.length} Tube${kit.reagentChemicalIds.length === 1 ? "" : "s"}</span>
+        <span class="cfg-add-meta">${kit.parameterName ? escapeHtml(cfgParamDe(kit.parameterName)) + " · " : ""}${kit.reagentChemicalIds.length} Tube${kit.reagentChemicalIds.length === 1 ? "" : "s"}</span>
       </button>`).join("")
     : `<p class="cfg-empty">${state.catalog.length ? "Keine passenden Tests (Tubes voll oder Parameter belegt)." : "Test-Katalog nicht verfügbar (Gerät offline?)."}</p>`;
   return `
