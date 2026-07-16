@@ -3467,8 +3467,8 @@ const styles = `
   .vial-card .vial-name,
   .chamber-operation {
     width: 100%;
-    min-height: 58px;
-    padding: 14px 7px 8px;
+    min-height: 52px;
+    padding: 12px 7px 7px;
     border-radius: 8px;
     background: rgba(8, 18, 21, 0.78);
     border: 1px solid rgba(102, 215, 247, 0.14);
@@ -3497,8 +3497,11 @@ const styles = `
     word-break: normal;
     white-space: normal;
   }
-  .chamber-slot {
-    align-self: end;
+  .chamber-slot p {
+    margin: 4px 0 0;
+    font-size: 10px;
+    line-height: 1.2;
+    color: #9daeb5;
   }
   .chamber-slot small {
     display: block;
@@ -3862,7 +3865,7 @@ const styles = `
   }
   .chamber-progress {
     height: 8px;
-    margin-top: 10px;
+    margin-top: 5px;
     overflow: hidden;
     border-radius: 999px;
     background: rgba(255,255,255,0.08);
