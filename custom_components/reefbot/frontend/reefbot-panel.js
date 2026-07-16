@@ -2904,9 +2904,9 @@ const styles = `
     bottom: 18px;
     display: grid;
     grid-template-columns: var(--slot-template);
+    grid-template-rows: 310px;
     gap: 6px;
-    align-items: end;
-    min-height: 310px;
+    align-items: start;
     z-index: 3;
   }
   .vial-card {
@@ -3086,6 +3086,9 @@ const styles = `
     overflow-wrap: break-word;
     word-break: normal;
     white-space: normal;
+  }
+  .chamber-slot {
+    align-self: end;
   }
   .chamber-slot small {
     display: block;
