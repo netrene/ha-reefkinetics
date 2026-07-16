@@ -12,7 +12,7 @@ class ReefBotPanel extends HTMLElement {
     this._maintenance = false;
     this._maintenanceView = "carousel";
     this._configOpen = false;
-    this._configDraft = null;
+    this._configState = null;
   }
 
   set hass(hass) {
@@ -82,7 +82,7 @@ class ReefBotPanel extends HTMLElement {
           </section>
         </section>
         ${renderMaintenanceOverlay(model, this._maintenance, this._maintenanceView)}
-        ${renderConfigOverlay(model, this._configOpen, this._configDraft)}
+        ${renderConfigOverlay(model, this._configOpen, this._configState)}
         ${renderConfirmDialog(this._confirmAction)}
         ${renderAlarmDialog(model, this._activeDialog === "alarms")}
         ${renderVialDialog(model, this._activeVial)}
@@ -167,7 +167,7 @@ class ReefBotPanel extends HTMLElement {
         this._activeVial = undefined;
         this._activeDialog = undefined;
         this._maintenance = false;
-        this._configDraft = null;
+        this._configState = buildTestConfig(model);
         this._configOpen = true;
         this.render();
       });
@@ -175,6 +175,20 @@ class ReefBotPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-close-config]").forEach((element) => {
       element.addEventListener("click", () => {
         this._configOpen = false;
+        this._configState = null;
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-config-add]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const kit = (this._configState?.catalog || []).find((k) => String(k.operationId) === button.dataset.configAdd);
+        if (kit) this._configState = cfgWithKitAdded(this._configState, kit);
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-config-remove]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (this._configState) this._configState = cfgWithKitRemoved(this._configState, button.dataset.configRemove);
         this.render();
       });
     });
@@ -230,29 +244,15 @@ class ReefBotPanel extends HTMLElement {
   }
 
   requestConfigSave() {
-    if (!this.shadowRoot) return;
-    const positions = [];
-    const draft = {};
-    this.shadowRoot.querySelectorAll("[data-config-tube]").forEach((select) => {
-      const value = select.value;
-      const number = Number(select.dataset.configTube);
-      draft[number] = value;
-      if (!value) return;
-      const option = select.options[select.selectedIndex];
-      positions.push({
-        chemical_id: value,
-        position_index: number - 1,
-        chemical_name: option ? option.textContent.trim() : "",
-      });
-    });
-    this._configDraft = draft;
+    if (!this._configState) return;
+    const positions = cfgFlattenPositions(this._configState);
     this._confirmAction = { kind: "config", positions, name: "Test-Konfiguration" };
     this.render();
   }
 
   saveConfig(positions) {
     this._configOpen = false;
-    this._configDraft = null;
+    this._configState = null;
     this._confirmAction = undefined;
     this.render();
     if (this._hass && Array.isArray(positions)) {
@@ -727,6 +727,7 @@ function buildModel(hass, lastPressed) {
     labDemo: LAB_DEMO,
     demoAnimate: DEMO_ANIM,
     availableChemicals: findAvailableChemicals(states),
+    availableOperations: findAvailableOperations(states),
     tests,
     configuredTests,
     rodi: componentModel(states, "rodi", ["rodi", "rodi tank", "ro tank"]),
@@ -1384,10 +1385,14 @@ function drawMaintenanceCarousel(ctx, W, H, tubes, rotation, selectedIndex) {
   });
 }
 
-// ==== Gap 1: Test-Konfiguration bearbeiten (Chemie ↔ Tube schreiben) ====
-// Editor: pro Tube ein Select aus dem Reagenzien-Katalog. "Speichern" postet die
-// komplette Belegung via Service reefbot.set_chemical_positions (nur bei explizitem
-// Klick, mit Bestätigung). Katalog kommt aus sensor.*_available_chemicals.
+// ==== Gap 1: Test-Konfiguration bearbeiten (Kit-basiert, wie App) ====
+// Kit-Karten + "Test hinzufügen". Kits = Cluster von Reagenzien, die sich Tests
+// teilen (Kombi-Kits bleiben zusammen). Hinzufügbar sind nur Tests, deren
+// Reagenzien/Parameter frei sind und die in die freien Tubes passen. "Speichern"
+// postet die komplette Belegung via reefbot.set_chemical_positions (nur bei Klick,
+// mit Bestätigung). Logik 1:1 aus der App (data/TestConfig.kt + buildTestConfig).
+
+const KIT_COLOR_PALETTE = ["#5FD7F7", "#7F77DD", "#1D9E75", "#EF9F27", "#D4537E", "#97C459", "#378ADD", "#D85A30"];
 
 function findAvailableChemicals(states) {
   for (const state of states) {
@@ -1400,19 +1405,211 @@ function findAvailableChemicals(states) {
   return [];
 }
 
-// Katalog ∪ aktuell belegte Reagenzien (falls der Katalog etwas nicht listet),
-// dedupliziert nach id, nach Name sortiert.
-function configOptions(model) {
-  const byId = new Map();
-  (model.availableChemicals || []).forEach((c) => {
-    if (c.id != null) byId.set(String(c.id), { id: String(c.id), name: c.name || String(c.id) });
+function findAvailableOperations(states) {
+  for (const state of states) {
+    if (!state.entity_id.startsWith("sensor.")) continue;
+    const ops = state.attributes?.operations;
+    if (Array.isArray(ops) && ops.length && ops[0] && Array.isArray(ops[0].reagents)) {
+      return ops;
+    }
+  }
+  return [];
+}
+
+function cfgCleanKitName(name) {
+  return String(name || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+function cfgLcp(strings) {
+  if (!strings.length) return "";
+  let prefix = strings[0];
+  for (const s of strings.slice(1)) {
+    let i = 0;
+    const max = Math.min(prefix.length, s.length);
+    while (i < max && prefix[i] === s[i]) i++;
+    prefix = prefix.slice(0, i);
+    if (!prefix) break;
+  }
+  return prefix;
+}
+function cfgLcs(strings) {
+  const rev = strings.map((s) => [...s].reverse().join(""));
+  return [...cfgLcp(rev)].reverse().join("");
+}
+function cfgTrimEnds(s) {
+  return String(s || "").replace(/^[\s\-/_.:·]+|[\s\-/_.:·]+$/g, "");
+}
+function cfgFallbackSingle(name) {
+  const token = (String(name || "").trim().split(/[ \-/_]/).pop() || "").trim();
+  return token.length >= 1 && token.length <= 3 ? token : "";
+}
+function cfgShortLabels(names) {
+  if (!names.length) return [];
+  if (names.length === 1) return [cfgFallbackSingle(names[0])];
+  const prefix = cfgLcp(names);
+  const suffix = cfgLcs(names);
+  return names.map((name) => {
+    let rest = name.length > prefix.length ? name.slice(prefix.length) : name;
+    if (suffix && rest.length > suffix.length && rest.endsWith(suffix)) {
+      rest = rest.slice(0, rest.length - suffix.length);
+    }
+    rest = cfgTrimEnds(rest);
+    if (!rest) return cfgFallbackSingle(name);
+    return rest.length <= 4 ? rest : rest.slice(0, 4);
   });
-  (model.tubes || []).forEach((t) => {
-    if (t.chemicalId && !byId.has(t.chemicalId)) {
-      byId.set(t.chemicalId, { id: t.chemicalId, name: t.shortName || t.chemicalId });
+}
+function cfgCommonBrandName(names) {
+  if (!names.length) return "";
+  if (names.length === 1) return cfgCleanKitName(names[0]);
+  const brand = cfgTrimEnds(cfgLcp(names));
+  if (brand.length >= 3) return brand;
+  return cfgCleanKitName(names.reduce((a, b) => (b.length > a.length ? b : a), names[0]));
+}
+function cfgKitColor(parameterName, fallbackIndex) {
+  const key = (parameterName || "").trim().toLowerCase();
+  let idx;
+  if (!key) {
+    idx = fallbackIndex;
+  } else {
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) & 0x7fffffff;
+    idx = h;
+  }
+  const n = KIT_COLOR_PALETTE.length;
+  return KIT_COLOR_PALETTE[((idx % n) + n) % n];
+}
+
+// Rohdaten → editierbarer Konfig-Zustand { vialCount, kits, catalog }.
+function buildTestConfig(model) {
+  const vialCount = Math.max(model.vialCount || 0, (model.tubes || []).length || 0) || 8;
+  const installed = (model.tubes || [])
+    .filter((t) => t.chemicalId)
+    .map((t) => ({ id: t.chemicalId, name: t.shortName || t.chemicalId, slot: t.number }));
+  const installedById = new Map(installed.map((r) => [r.id, r]));
+
+  const catalog = [];
+  const seenOps = new Set();
+  (model.availableOperations || []).forEach((op) => {
+    const reagents = Array.isArray(op.reagents) ? op.reagents : [];
+    const ids = reagents.map((r) => String(r.id)).filter(Boolean);
+    const opId = op.id != null ? String(op.id) : "";
+    if (!ids.length || !opId || seenOps.has(opId)) return;
+    seenOps.add(opId);
+    catalog.push({
+      operationId: opId,
+      displayName: String(op.name || opId),
+      parameterName: op.parameter || null,
+      reagentChemicalIds: ids,
+      reagentNames: reagents.map((r) => String(r.name != null ? r.name : r.id)),
+    });
+  });
+
+  const activeOps = catalog.filter((op) => op.reagentChemicalIds.every((id) => installedById.has(id)));
+
+  const clusters = [];
+  activeOps.forEach((op) => {
+    const opIds = new Set(op.reagentChemicalIds);
+    const overlap = clusters.filter((c) => [...c.ids].some((id) => opIds.has(id)));
+    if (!overlap.length) {
+      clusters.push({ ops: [op], ids: opIds });
+    } else {
+      const target = overlap[0];
+      target.ops.push(op);
+      opIds.forEach((id) => target.ids.add(id));
+      overlap.slice(1).forEach((o) => {
+        o.ops.forEach((x) => target.ops.push(x));
+        o.ids.forEach((id) => target.ids.add(id));
+        const i = clusters.indexOf(o);
+        if (i >= 0) clusters.splice(i, 1);
+      });
     }
   });
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  const kitFromReagents = (opId, name, param, params, ids) => {
+    const reagents = [...ids].map((id) => installedById.get(id)).filter(Boolean).sort((a, b) => a.slot - b.slot);
+    if (!reagents.length) return null;
+    const labels = cfgShortLabels(reagents.map((r) => r.name));
+    return {
+      operationId: opId,
+      displayName: cfgCleanKitName(name),
+      parameterName: param || null,
+      parameters: params || [],
+      colorHex: "",
+      reagents: reagents.map((r, i) => ({ chemicalId: r.id, chemicalName: r.name, shortLabel: labels[i] || "", slot: r.slot })),
+    };
+  };
+
+  const clusterKits = clusters.map((c) => {
+    const rep = c.ops.reduce((a, b) => (b.reagentChemicalIds.length > a.reagentChemicalIds.length ? b : a), c.ops[0]);
+    const brand = cfgCommonBrandName(c.ops.map((o) => o.displayName));
+    const params = [...new Set(c.ops.map((o) => (o.parameterName || "").trim()).filter(Boolean))];
+    return kitFromReagents(rep.operationId, brand, rep.parameterName, params, c.ids);
+  }).filter(Boolean);
+
+  const coveredIds = new Set(clusters.flatMap((c) => [...c.ids]));
+  const orphanKits = installed
+    .filter((r) => !coveredIds.has(r.id))
+    .map((r) => kitFromReagents("orphan:" + r.slot, r.name, null, [], [r.id]))
+    .filter(Boolean);
+
+  const kits = [...clusterKits, ...orphanKits]
+    .sort((a, b) => (a.reagents[0] ? a.reagents[0].slot : 1e9) - (b.reagents[0] ? b.reagents[0].slot : 1e9))
+    .map((kit, i) => ({ ...kit, colorHex: cfgKitColor(kit.parameterName, i) }));
+
+  return { vialCount, kits, catalog };
+}
+
+function cfgUsedSlots(state) {
+  const used = new Set();
+  state.kits.forEach((k) => k.reagents.forEach((r) => used.add(r.slot)));
+  return used;
+}
+function cfgFreeSlots(state) {
+  const used = cfgUsedSlots(state);
+  const free = [];
+  for (let n = 1; n <= state.vialCount; n++) if (!used.has(n)) free.push(n);
+  return free;
+}
+function cfgAddable(state) {
+  const installedReagentIds = new Set(state.kits.flatMap((k) => k.reagents.map((r) => r.chemicalId)));
+  const installedOps = new Set(state.kits.map((k) => k.operationId));
+  const installedParams = new Set(state.kits.map((k) => (k.parameterName || "").trim().toLowerCase()).filter(Boolean));
+  const freeCount = cfgFreeSlots(state).length;
+  return state.catalog.filter((kit) =>
+    !installedOps.has(kit.operationId) &&
+    !kit.reagentChemicalIds.some((id) => installedReagentIds.has(id)) &&
+    (!kit.parameterName || !installedParams.has(kit.parameterName.trim().toLowerCase())) &&
+    kit.reagentChemicalIds.length >= 1 &&
+    kit.reagentChemicalIds.length <= freeCount
+  );
+}
+function cfgWithKitAdded(state, kit) {
+  if (!kit) return state;
+  const free = cfgFreeSlots(state);
+  if (kit.reagentChemicalIds.length > free.length) return state;
+  const names = kit.reagentNames || [];
+  const labels = cfgShortLabels(kit.reagentChemicalIds.map((id, i) => names[i] || id));
+  const reagents = kit.reagentChemicalIds
+    .map((id, i) => ({ chemicalId: id, chemicalName: names[i] || id, shortLabel: labels[i] || "", slot: free[i] }))
+    .sort((a, b) => a.slot - b.slot);
+  const newKit = {
+    operationId: kit.operationId,
+    displayName: cfgCleanKitName(kit.displayName),
+    parameterName: kit.parameterName || null,
+    parameters: kit.parameterName ? [kit.parameterName] : [],
+    colorHex: cfgKitColor(kit.parameterName, state.kits.length),
+    reagents,
+  };
+  return { ...state, kits: [...state.kits, newKit] };
+}
+function cfgWithKitRemoved(state, operationId) {
+  return { ...state, kits: state.kits.filter((k) => String(k.operationId) !== String(operationId)) };
+}
+function cfgFlattenPositions(state) {
+  const positions = [];
+  state.kits.forEach((k) => k.reagents.forEach((r) => positions.push({
+    chemical_id: r.chemicalId, position_index: r.slot - 1, chemical_name: r.chemicalName,
+  })));
+  return positions;
 }
 
 function renderConfigEntry(model) {
@@ -1427,39 +1624,46 @@ function renderConfigEntry(model) {
   `;
 }
 
-function renderConfigOverlay(model, open, draft) {
-  if (!open) return "";
-  const count = Math.max(model.vialCount || 0, model.tubes.length || 0) || 8;
-  const options = configOptions(model);
-  const current = new Map();
-  (model.tubes || []).forEach((t) => { if (t.chemicalId) current.set(t.number, t.chemicalId); });
-  const rows = [];
-  for (let n = 1; n <= count; n++) {
-    const sel = draft && draft[n] !== undefined ? draft[n] : (current.get(n) || "");
-    const opts = [`<option value="">— leer —</option>`].concat(
-      options.map((o) => `<option value="${escapeHtml(o.id)}" ${o.id === sel ? "selected" : ""}>${escapeHtml(o.name)}</option>`)
-    ).join("");
-    rows.push(`
-      <div class="cfg-row">
-        <span class="cfg-num">${n}</span>
-        <select class="cfg-select" data-config-tube="${n}" ${options.length ? "" : "disabled"}>${opts}</select>
-      </div>`);
-  }
-  const body = options.length
-    ? `<div class="cfg-list">${rows.join("")}</div>`
-    : `<p class="cfg-empty">Reagenzien-Katalog nicht verfügbar (Gerät offline?). Bitte später erneut versuchen.</p>`;
+function renderConfigOverlay(model, open, state) {
+  if (!open || !state) return "";
+  const free = cfgFreeSlots(state);
+  const addable = cfgAddable(state);
+  const kitCards = state.kits.length
+    ? state.kits.map((k) => `
+      <div class="cfg-kit" style="border-left-color:${k.colorHex};">
+        <div class="cfg-kit-head">
+          <span class="cfg-kit-name">${escapeHtml(k.displayName)}</span>
+          <button class="cfg-kit-remove" data-config-remove="${escapeHtml(k.operationId)}" title="Entfernen">✕</button>
+        </div>
+        ${k.parameters && k.parameters.length ? `<div class="cfg-kit-params">${k.parameters.map((p) => escapeHtml(p)).join(" · ")}</div>` : ""}
+        <div class="cfg-kit-reagents">
+          ${k.reagents.map((r) => `<span class="cfg-reagent"><b>T${r.slot}</b>${r.shortLabel ? `<i>${escapeHtml(r.shortLabel)}</i>` : ""}<em>${escapeHtml(r.chemicalName)}</em></span>`).join("")}
+        </div>
+      </div>`).join("")
+    : `<p class="cfg-empty">Noch keine Tests konfiguriert.</p>`;
+  const addList = addable.length
+    ? addable.map((kit) => `
+      <button class="cfg-add-kit" data-config-add="${escapeHtml(kit.operationId)}">
+        <span class="cfg-add-name">${escapeHtml(cfgCleanKitName(kit.displayName))}</span>
+        <span class="cfg-add-meta">${kit.parameterName ? escapeHtml(kit.parameterName) + " · " : ""}${kit.reagentChemicalIds.length} Tube${kit.reagentChemicalIds.length === 1 ? "" : "s"}</span>
+      </button>`).join("")
+    : `<p class="cfg-empty">${state.catalog.length ? "Keine passenden Tests (Tubes voll oder Parameter belegt)." : "Test-Katalog nicht verfügbar (Gerät offline?)."}</p>`;
   return `
     <div class="dialog-backdrop cfg-backdrop" data-close-config>
       <section class="dialog-card cfg-dialog" role="dialog" aria-modal="true" aria-label="Test-Konfiguration" data-dialog-card>
         <div class="cfg-toolbar">
           <h2>Test-Konfiguration</h2>
+          <span class="cfg-free">${free.length}/${state.vialCount} Tubes frei</span>
           <button class="icon-close" data-close-config title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
         </div>
-        <p class="cfg-hint">Reagenz je Tube zuordnen. ⚠ Tests brauchen alle zugehörigen Reagenzien (z.B. A/B/C). Beim Speichern wird die komplette Belegung ans Gerät geschrieben.</p>
-        ${body}
+        <div class="cfg-section-title">Konfigurierte Tests</div>
+        <div class="cfg-kits">${kitCards}</div>
+        <div class="cfg-section-title">Test hinzufügen</div>
+        <div class="cfg-addlist">${addList}</div>
+        <p class="cfg-hint">Reagenzien bleiben als Kit zusammen. Beim Speichern wird die komplette Belegung ans Gerät geschrieben.</p>
         <div class="dialog-actions">
           <button class="ghost" data-close-config>Abbrechen</button>
-          <button class="primary" data-config-save ${options.length ? "" : "disabled"}>Speichern</button>
+          <button class="primary" data-config-save>Speichern</button>
         </div>
       </section>
     </div>
@@ -3264,40 +3468,81 @@ const styles = `
     font-size: 12px;
     line-height: 1.4;
   }
-  .cfg-empty { color: #ffd16c; font-size: 13px; }
-  .cfg-list {
+  .cfg-empty { color: #9db4bc; font-size: 13px; margin: 2px 0 4px; }
+  .cfg-free {
+    margin-left: auto;
+    color: #9db4bc;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .cfg-section-title {
+    color: #90a2aa;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 12px 0 6px;
+  }
+  .cfg-kits {
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
-  .cfg-row {
-    display: grid;
-    grid-template-columns: 30px 1fr;
+  .cfg-kit {
+    background: rgba(8, 18, 21, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-left: 3px solid #5fd7f7;
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .cfg-kit-head {
+    display: flex;
     align-items: center;
-    gap: 12px;
+    justify-content: space-between;
+    gap: 10px;
   }
-  .cfg-num {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: #0d252f;
-    border: 1px solid #2f5866;
+  .cfg-kit-name { font-size: 14px; font-weight: 500; color: #edf7fa; }
+  .cfg-kit-remove {
+    background: transparent;
+    border: none;
+    color: #d88;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .cfg-kit-remove:hover { background: rgba(255, 120, 120, 0.14); }
+  .cfg-kit-params { color: #8fb6c0; font-size: 12px; margin-top: 2px; }
+  .cfg-kit-reagents { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .cfg-reagent {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
     color: #cfe6ee;
-    display: grid;
-    place-items: center;
-    font-size: 12px;
   }
-  .cfg-select {
-    width: 100%;
-    min-height: 38px;
-    padding: 6px 10px;
+  .cfg-reagent b { color: #66d7f7; font-weight: 500; }
+  .cfg-reagent i { color: #edf7fa; font-style: normal; font-weight: 500; }
+  .cfg-reagent em { color: #9db4bc; font-style: normal; }
+  .cfg-addlist { display: flex; flex-direction: column; gap: 6px; }
+  .cfg-add-kit {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: left;
+    background: #101c22;
+    border: 1px solid #24343b;
     border-radius: 8px;
-    background: #0e181c;
+    padding: 9px 12px;
     color: #edf7fa;
-    border: 1px solid #2a3a41;
-    font-size: 14px;
+    cursor: pointer;
   }
-  .cfg-select:disabled { opacity: 0.5; }
+  .cfg-add-kit:hover { border-color: rgba(102, 215, 247, 0.4); background: #13252c; }
+  .cfg-add-name { font-size: 14px; }
+  .cfg-add-meta { color: #8fb6c0; font-size: 12px; white-space: nowrap; }
   .machine {
     min-height: 510px;
     overflow-x: auto;

@@ -55,6 +55,7 @@ async def async_setup_entry(
             _device_value("VialsNumber", "vialsNumber"),
         ),
         ReefBotAvailableChemicalsSensor(coordinator),
+        ReefBotAvailableOperationsSensor(coordinator),
         ReefBotCurrentOperationSensor(coordinator),
         ReefBotPendingOperationsSensor(coordinator),
         ReefBotCurrentTestDurationSensor(coordinator),
@@ -801,6 +802,107 @@ class ReefBotAvailableChemicalsSensor(ReefBotEntity, SensorEntity):
             seen.add(key)
             items.append({"id": key, "name": str(name)})
         return items
+
+
+class ReefBotAvailableOperationsSensor(ReefBotEntity, SensorEntity):
+    """Diagnostic catalog of available tests + their reagents (config editor).
+
+    Feeds the panel's kit-based "Configure tests" editor: each entry carries the
+    operation id, name, parameter and the reagents (id + name) it needs.
+    """
+
+    _attr_icon = "mdi:beaker-check-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the operations catalog sensor."""
+        super().__init__(coordinator, "available_operations")
+        self._attr_name = "Available operations"
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of available operations with reagents."""
+        return len(self._operations())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the operations catalog for the config editor."""
+        return {"operations": self._operations()}
+
+    def _operations(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for operation in self.coordinator.data.available_operations or []:
+            related = _first_present(
+                operation, ("RelatedChemicals", "relatedChemicals")
+            )
+            if not isinstance(related, list):
+                continue
+            reagents: list[dict[str, str]] = []
+            for chemical in related:
+                if not isinstance(chemical, dict):
+                    continue
+                reagent_id = _first_present(
+                    chemical,
+                    (
+                        "AvailableChemicalId",
+                        "availableChemicalId",
+                        "ChemicalId",
+                        "chemicalId",
+                    ),
+                )
+                if reagent_id is None:
+                    continue
+                reagent_name = _first_present(
+                    chemical,
+                    (
+                        "ChemicalName",
+                        "chemicalName",
+                        "AvailableChemicalName",
+                        "availableChemicalName",
+                        "ChemicalDisplayName",
+                        "chemicalDisplayName",
+                        "Name",
+                        "name",
+                        "DisplayName",
+                        "displayName",
+                    ),
+                )
+                reagents.append(
+                    {
+                        "id": str(reagent_id),
+                        "name": str(reagent_name)
+                        if reagent_name is not None
+                        else str(reagent_id),
+                    }
+                )
+            if not reagents:
+                continue
+            operation_id = _first_present(
+                operation,
+                ("AvailableOperationId", "availableOperationId", "Id", "id"),
+            )
+            name = _first_present(
+                operation, ("DisplayName", "displayName", "Name", "name")
+            )
+            if operation_id is None or name is None:
+                continue
+            out.append(
+                {
+                    "id": str(operation_id),
+                    "name": str(name),
+                    "parameter": _first_present(
+                        operation,
+                        (
+                            "OperationParameterName",
+                            "operationParameterName",
+                            "ParameterName",
+                            "parameterName",
+                        ),
+                    ),
+                    "reagents": reagents,
+                }
+            )
+        return out
 
 
 class ReefBotConfiguredTestSensor(ReefBotEntity, SensorEntity):
