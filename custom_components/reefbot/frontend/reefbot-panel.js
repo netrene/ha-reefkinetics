@@ -2905,7 +2905,7 @@ const styles = `
     display: grid;
     grid-template-columns: var(--slot-template);
     gap: 6px;
-    align-items: start;
+    align-items: end;
     min-height: 310px;
     z-index: 3;
   }
