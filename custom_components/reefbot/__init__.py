@@ -11,6 +11,7 @@ from .api import ReefBotApiClient
 from .const import DOMAIN
 from .coordinator import ReefBotCoordinator
 from .panel import async_setup_panel, async_unload_panel_if_unused
+from .services import async_setup_services, async_unload_services
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -28,6 +29,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await async_setup_panel(hass)
+    async_setup_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -38,4 +40,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
         async_unload_panel_if_unused(hass)
+        async_unload_services(hass)
     return unload_ok

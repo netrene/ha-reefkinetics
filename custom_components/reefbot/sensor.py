@@ -54,6 +54,7 @@ async def async_setup_entry(
             "vials_number",
             _device_value("VialsNumber", "vialsNumber"),
         ),
+        ReefBotAvailableChemicalsSensor(coordinator),
         ReefBotCurrentOperationSensor(coordinator),
         ReefBotPendingOperationsSensor(coordinator),
         ReefBotCurrentTestDurationSensor(coordinator),
@@ -739,6 +740,67 @@ class ReefBotTubeSensor(ReefBotEntity, SensorEntity):
             except (TypeError, ValueError):
                 continue
         return None
+
+
+class ReefBotAvailableChemicalsSensor(ReefBotEntity, SensorEntity):
+    """Diagnostic catalog of assignable chemicals (for the config editor)."""
+
+    _attr_icon = "mdi:format-list-bulleted"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: ReefBotCoordinator) -> None:
+        """Initialize the catalog sensor."""
+        super().__init__(coordinator, "available_chemicals")
+        self._attr_name = "Available chemicals"
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of assignable chemicals."""
+        return len(self._catalog())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the chemical catalog as id/name pairs."""
+        return {"chemicals": self._catalog()}
+
+    def _catalog(self) -> list[dict[str, str]]:
+        items: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for chemical in self.coordinator.data.available_chemicals or []:
+            chemical_id = _first_present(
+                chemical,
+                (
+                    "ChemicalId",
+                    "chemicalId",
+                    "AvailableChemicalId",
+                    "availableChemicalId",
+                    "Id",
+                    "id",
+                ),
+            )
+            name = _first_present(
+                chemical,
+                (
+                    "ChemicalName",
+                    "chemicalName",
+                    "AvailableChemicalName",
+                    "availableChemicalName",
+                    "ChemicalDisplayName",
+                    "chemicalDisplayName",
+                    "Name",
+                    "name",
+                    "DisplayName",
+                    "displayName",
+                ),
+            )
+            if chemical_id is None or name is None:
+                continue
+            key = str(chemical_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append({"id": key, "name": str(name)})
+        return items
 
 
 class ReefBotConfiguredTestSensor(ReefBotEntity, SensorEntity):

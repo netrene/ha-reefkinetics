@@ -1,0 +1,25 @@
+set_chemical_positions:
+  name: Set chemical positions
+  description: >-
+    Write the complete reagent-to-tube assignment for a ReefBot device
+    (Setup Tests / Save Changes). Sends every occupied tube; omitted tubes are
+    cleared. This changes device configuration in the Reef Kinetics cloud.
+  fields:
+    device_id:
+      name: Device ID
+      description: >-
+        Reef Kinetics device id. Optional when only one ReefBot is set up.
+      required: false
+      example: 4713
+      selector:
+        text:
+    positions:
+      name: Positions
+      description: >-
+        Full list of occupied tubes. Each item needs chemical_id,
+        position_index (0-based; Tube 1 = 0) and chemical_name.
+      required: true
+      example: >-
+        [{"chemical_id": 123, "position_index": 0, "chemical_name": "RedSea Alkalinity Pro"}]
+      selector:
+        object:

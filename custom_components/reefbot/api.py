@@ -39,6 +39,10 @@ ENDPOINT_CHEMICAL_SETTINGS = "/api/APIService/GetDeviceChemicalSettings"
 ENDPOINT_UPDATE_CHEMICAL_SETTINGS = (
     "/api/APIService/UpdateDeviceAvailableChemicalsSettingsV2"
 )
+ENDPOINT_AVAILABLE_CHEMICALS = "/api/APIService/GetAvailableChemicals"
+ENDPOINT_UPDATE_CHEMICAL_POSITIONS = (
+    "/api/APIService/UpdateDeviceAvailableChemicalsPositions"
+)
 ENDPOINT_AVAILABLE_OPERATIONS = "/api/APIService/GetAvailableOperations"
 ENDPOINT_SOURCE_SETTINGS = "/api/APIService/GetDeviceSourceSettings"
 ENDPOINT_DEVICE_RESULTS = "/api/APIService/GetOperationResultsByDeviceIdV2"
@@ -219,6 +223,63 @@ class ReefBotApiClient:
             },
         )
         return updated_chemical
+
+    async def get_available_chemicals(
+        self, device_id: int | str
+    ) -> list[dict[str, Any]]:
+        """Return the catalog of chemicals assignable to a ReefBot device."""
+        payload = await self._post(
+            ENDPOINT_AVAILABLE_CHEMICALS, {"DeviceId": device_id}
+        )
+        return self._extract_list(
+            payload,
+            ("Chemicals", "chemicals", "AvailableChemicals", "availableChemicals"),
+        )
+
+    async def update_chemical_positions(
+        self, device_id: int | str, positions: list[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Write the complete chemical->tube assignment (Setup Tests / Save Changes).
+
+        ``positions`` is the full list of occupied tubes; each item carries a
+        chemical id, a 0-based position index (Tube 1 = 0) and a chemical name.
+        Payload matches the confirmed Android-app request:
+        ``{DeviceId, ChemicalPositions: [{ChemicalId(num|str), PositionIndex(int),
+        chemicalName}]}``.
+        """
+        chemical_positions: list[dict[str, Any]] = []
+        for position in positions:
+            chemical_id = _first_present(
+                position,
+                (
+                    "chemical_id",
+                    "ChemicalId",
+                    "chemicalId",
+                    "AvailableChemicalId",
+                    "availableChemicalId",
+                ),
+            )
+            position_index = _first_present(
+                position, ("position_index", "PositionIndex", "positionIndex")
+            )
+            chemical_name = _first_present(
+                position, ("chemical_name", "chemicalName", "ChemicalName")
+            )
+            if chemical_id is None or position_index is None:
+                continue
+            chemical_positions.append(
+                {
+                    "ChemicalId": _numeric_id(chemical_id),
+                    "PositionIndex": int(position_index),
+                    "chemicalName": str(chemical_name or ""),
+                }
+            )
+
+        await self._post(
+            ENDPOINT_UPDATE_CHEMICAL_POSITIONS,
+            {"DeviceId": device_id, "ChemicalPositions": chemical_positions},
+        )
+        return chemical_positions
 
     async def get_available_operations(
         self, device_id: int | str
@@ -617,6 +678,14 @@ def _component_reset_value(component: Mapping[str, Any]) -> Any:
     if reset_title in {"empty", "replace", "reset"}:
         return 0
     return None
+
+
+def _numeric_id(value: Any) -> int | str:
+    """Send a chemical id as int when parseable (API format), else as string."""
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _api_number(value: float) -> int | float:

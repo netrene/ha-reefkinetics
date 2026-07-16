@@ -9,7 +9,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import slugify
 
@@ -35,6 +35,7 @@ class ReefBotData:
     results: dict[str, Any]
     parameter_results: dict[str, list[dict[str, Any]]]
     chemicals: list[dict[str, Any]]
+    available_chemicals: list[dict[str, Any]]
     available_operations: list[dict[str, Any]]
     source_settings: list[dict[str, Any]]
     device_results: list[dict[str, Any]]
@@ -253,6 +254,13 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
                 if device_id
                 else []
             )
+            available_chemicals = (
+                await self._async_optional_list(
+                    self.client.get_available_chemicals, device_id
+                )
+                if device_id
+                else []
+            )
             available_operations = (
                 await self._async_optional_list(
                     self.client.get_available_operations, device_id
@@ -333,6 +341,7 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
             results=results,
             parameter_results=parameter_results,
             chemicals=chemicals,
+            available_chemicals=available_chemicals,
             available_operations=available_operations,
             source_settings=source_settings,
             device_results=device_results,
@@ -364,6 +373,28 @@ class ReefBotCoordinator(DataUpdateCoordinator[ReefBotData]):
         except ReefBotApiError:
             _LOGGER.debug("Unable to fetch optional ReefBot value", exc_info=True)
             return None
+
+    def _resolve_device_id(self) -> Any:
+        """Return the configured ReefBot device id, if known."""
+        device_id = self.entry.data.get(CONF_DEVICE_ID)
+        if device_id is None and self.data and self.data.device:
+            device_id = self.data.device.get(
+                "DeviceId", self.data.device.get("deviceId")
+            )
+        return device_id
+
+    async def async_set_chemical_positions(
+        self, positions: list[dict[str, Any]]
+    ) -> None:
+        """Write the full chemical->tube assignment, then refresh (Gap 1 write)."""
+        device_id = self._resolve_device_id()
+        if device_id is None:
+            raise HomeAssistantError("ReefBot device id is unknown")
+        try:
+            await self.client.update_chemical_positions(device_id, positions)
+        except ReefBotApiError as err:
+            raise HomeAssistantError(str(err)) from err
+        await self.async_request_refresh()
 
     async def _async_fetch_parameter_results(
         self, results: dict[str, Any], tank_id: int | str

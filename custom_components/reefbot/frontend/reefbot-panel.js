@@ -11,10 +11,13 @@ class ReefBotPanel extends HTMLElement {
     this._activeVial = undefined;
     this._maintenance = false;
     this._maintenanceView = "carousel";
+    this._configOpen = false;
+    this._configDraft = null;
   }
 
   set hass(hass) {
     this._hass = hass;
+    if (this._configOpen) return; // Editor offen: kein Re-Render (würde Selects zurücksetzen)
     const now = Date.now();
     let refreshInterval = this._activeVial || this._maintenance ? 60000 : this._activeDialog || this._confirmAction ? 15000 : 3000;
     if (this._activeVial && isChamberActive(buildModel(hass, this._lastPressed))) {
@@ -73,11 +76,13 @@ class ReefBotPanel extends HTMLElement {
               ${renderLabDemoToggle(model)}
               ${renderMachine(model)}
               ${renderMaintenanceEntry(model)}
+              ${renderConfigEntry(model)}
               ${renderMaintenance(model)}
             </section>
           </section>
         </section>
         ${renderMaintenanceOverlay(model, this._maintenance, this._maintenanceView)}
+        ${renderConfigOverlay(model, this._configOpen, this._configDraft)}
         ${renderConfirmDialog(this._confirmAction)}
         ${renderAlarmDialog(model, this._activeDialog === "alarms")}
         ${renderVialDialog(model, this._activeVial)}
@@ -157,6 +162,25 @@ class ReefBotPanel extends HTMLElement {
         this.render();
       });
     });
+    this.shadowRoot.querySelectorAll("[data-open-config]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._activeVial = undefined;
+        this._activeDialog = undefined;
+        this._maintenance = false;
+        this._configDraft = null;
+        this._configOpen = true;
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-close-config]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._configOpen = false;
+        this.render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-config-save]").forEach((button) => {
+      button.addEventListener("click", () => this.requestConfigSave());
+    });
     if (model.labMode) this.mountLabCarousel(model);
     else this.teardownLabCarousel();
     if (this._maintenance && this._maintenanceView !== "list") this.mountMaintenanceCarousel(model);
@@ -198,7 +222,43 @@ class ReefBotPanel extends HTMLElement {
   confirmPendingAction() {
     const action = this._confirmAction;
     this._confirmAction = undefined;
+    if (action?.kind === "config") {
+      this.saveConfig(action.positions);
+      return;
+    }
     this.executeButtonPress(action);
+  }
+
+  requestConfigSave() {
+    if (!this.shadowRoot) return;
+    const positions = [];
+    const draft = {};
+    this.shadowRoot.querySelectorAll("[data-config-tube]").forEach((select) => {
+      const value = select.value;
+      const number = Number(select.dataset.configTube);
+      draft[number] = value;
+      if (!value) return;
+      const option = select.options[select.selectedIndex];
+      positions.push({
+        chemical_id: value,
+        position_index: number - 1,
+        chemical_name: option ? option.textContent.trim() : "",
+      });
+    });
+    this._configDraft = draft;
+    this._confirmAction = { kind: "config", positions, name: "Test-Konfiguration" };
+    this.render();
+  }
+
+  saveConfig(positions) {
+    this._configOpen = false;
+    this._configDraft = null;
+    this._confirmAction = undefined;
+    this.render();
+    if (this._hass && Array.isArray(positions)) {
+      this._hass.callService("reefbot", "set_chemical_positions", { positions });
+      this.refreshReefBotEntities();
+    }
   }
 
   closeDialog() {
@@ -611,6 +671,7 @@ function buildModel(hass, lastPressed) {
         number,
         name: state.attributes.chemical_display_name || state.attributes.friendly_name || `Tube ${number}`,
         shortName: shortenChemical(state.attributes.chemical_display_name || state.attributes.friendly_name || `Tube ${number}`),
+        chemicalId: state.attributes.chemical_id != null ? String(state.attributes.chemical_id) : null,
         current: numberValue(state.attributes.current_volume ?? state.state),
         capacity: numberValue(state.attributes.capacity) ?? 20,
         percentage: clamp(numberValue(state.attributes.fill_percentage) ?? percent(state.attributes.current_volume ?? state.state, state.attributes.capacity ?? 20), 0, 100),
@@ -665,6 +726,7 @@ function buildModel(hass, lastPressed) {
     labMode: vialCount >= 9,
     labDemo: LAB_DEMO,
     demoAnimate: DEMO_ANIM,
+    availableChemicals: findAvailableChemicals(states),
     tests,
     configuredTests,
     rodi: componentModel(states, "rodi", ["rodi", "rodi tank", "ro tank"]),
@@ -750,6 +812,21 @@ function alarmClass(model) {
 
 function renderConfirmDialog(action) {
   if (!action) return "";
+  if (action.kind === "config") {
+    const count = Array.isArray(action.positions) ? action.positions.length : 0;
+    return `
+      <div class="dialog-backdrop" data-dialog-close>
+        <section class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="confirm-action-title" data-dialog-card>
+          <h2 id="confirm-action-title">Konfiguration speichern?</h2>
+          <p>ReefBot überschreibt die komplette Reagenzien-Belegung des Geräts (<strong>${count} belegte${count === 1 ? "s" : ""} Röhrchen</strong>). Nicht zugeordnete Röhrchen werden geleert. Bitte nur bestätigen, wenn die physische Belegung wirklich stimmt.</p>
+          <div class="dialog-actions">
+            <button class="ghost" data-dialog-close>Abbrechen</button>
+            <button class="primary danger" data-confirm-start>Speichern bestätigen</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
   const isRefill = action.kind === "refill";
   const title = isRefill ? "Füllstand zurücksetzen?" : "Test starten?";
   const message = isRefill
@@ -1305,6 +1382,88 @@ function drawMaintenanceCarousel(ctx, W, H, tubes, rotation, selectedIndex) {
     labVial(ctx, p.x, p.by, p.s, tubes[p.i], p.i === selectedIndex);
     labBadge(ctx, p.x, p.by + 11 * p.s, tubes[p.i].number, p.s, p.i === selectedIndex, Math.min(1, Math.max(0.45, 0.5 + 0.5 * (p.fr + 1) / 2)));
   });
+}
+
+// ==== Gap 1: Test-Konfiguration bearbeiten (Chemie ↔ Tube schreiben) ====
+// Editor: pro Tube ein Select aus dem Reagenzien-Katalog. "Speichern" postet die
+// komplette Belegung via Service reefbot.set_chemical_positions (nur bei explizitem
+// Klick, mit Bestätigung). Katalog kommt aus sensor.*_available_chemicals.
+
+function findAvailableChemicals(states) {
+  for (const state of states) {
+    if (!state.entity_id.startsWith("sensor.")) continue;
+    const chems = state.attributes?.chemicals;
+    if (Array.isArray(chems) && chems.length && chems[0] && chems[0].id != null) {
+      return chems.map((c) => ({ id: String(c.id), name: String(c.name ?? c.id) }));
+    }
+  }
+  return [];
+}
+
+// Katalog ∪ aktuell belegte Reagenzien (falls der Katalog etwas nicht listet),
+// dedupliziert nach id, nach Name sortiert.
+function configOptions(model) {
+  const byId = new Map();
+  (model.availableChemicals || []).forEach((c) => {
+    if (c.id != null) byId.set(String(c.id), { id: String(c.id), name: c.name || String(c.id) });
+  });
+  (model.tubes || []).forEach((t) => {
+    if (t.chemicalId && !byId.has(t.chemicalId)) {
+      byId.set(t.chemicalId, { id: t.chemicalId, name: t.shortName || t.chemicalId });
+    }
+  });
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderConfigEntry(model) {
+  if (isChamberActive(model)) return "";
+  return `
+    <div class="cfg-entry">
+      <button data-open-config>
+        <ha-icon icon="mdi:tune-variant"></ha-icon>
+        <span>Test-Konfiguration bearbeiten</span>
+      </button>
+    </div>
+  `;
+}
+
+function renderConfigOverlay(model, open, draft) {
+  if (!open) return "";
+  const count = Math.max(model.vialCount || 0, model.tubes.length || 0) || 8;
+  const options = configOptions(model);
+  const current = new Map();
+  (model.tubes || []).forEach((t) => { if (t.chemicalId) current.set(t.number, t.chemicalId); });
+  const rows = [];
+  for (let n = 1; n <= count; n++) {
+    const sel = draft && draft[n] !== undefined ? draft[n] : (current.get(n) || "");
+    const opts = [`<option value="">— leer —</option>`].concat(
+      options.map((o) => `<option value="${escapeHtml(o.id)}" ${o.id === sel ? "selected" : ""}>${escapeHtml(o.name)}</option>`)
+    ).join("");
+    rows.push(`
+      <div class="cfg-row">
+        <span class="cfg-num">${n}</span>
+        <select class="cfg-select" data-config-tube="${n}" ${options.length ? "" : "disabled"}>${opts}</select>
+      </div>`);
+  }
+  const body = options.length
+    ? `<div class="cfg-list">${rows.join("")}</div>`
+    : `<p class="cfg-empty">Reagenzien-Katalog nicht verfügbar (Gerät offline?). Bitte später erneut versuchen.</p>`;
+  return `
+    <div class="dialog-backdrop cfg-backdrop" data-close-config>
+      <section class="dialog-card cfg-dialog" role="dialog" aria-modal="true" aria-label="Test-Konfiguration" data-dialog-card>
+        <div class="cfg-toolbar">
+          <h2>Test-Konfiguration</h2>
+          <button class="icon-close" data-close-config title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
+        </div>
+        <p class="cfg-hint">Reagenz je Tube zuordnen. ⚠ Tests brauchen alle zugehörigen Reagenzien (z.B. A/B/C). Beim Speichern wird die komplette Belegung ans Gerät geschrieben.</p>
+        ${body}
+        <div class="dialog-actions">
+          <button class="ghost" data-close-config>Abbrechen</button>
+          <button class="primary" data-config-save ${options.length ? "" : "disabled"}>Speichern</button>
+        </div>
+      </section>
+    </div>
+  `;
 }
 
 function renderMachine(model) {
@@ -3068,6 +3227,77 @@ const styles = `
     cursor: pointer;
   }
   .maint-row-refill:disabled { opacity: 0.35; cursor: default; border-color: rgba(255,255,255,0.1); color: #7f9299; }
+  .cfg-entry {
+    display: flex;
+    justify-content: center;
+    margin: 8px 0 2px;
+  }
+  .cfg-entry button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #132027;
+    color: #9edff0;
+    border: 1px solid #2f4a54;
+    border-radius: 999px;
+    padding: 9px 18px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .cfg-entry button:hover { background: #17313b; }
+  .cfg-entry ha-icon { --mdc-icon-size: 20px; }
+  .cfg-dialog {
+    width: min(560px, 100%);
+    max-height: min(88vh, 760px);
+  }
+  .cfg-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .cfg-toolbar h2 { margin: 0; font-size: 20px; }
+  .cfg-hint {
+    margin: 0 0 12px;
+    color: #9db4bc;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .cfg-empty { color: #ffd16c; font-size: 13px; }
+  .cfg-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .cfg-row {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    align-items: center;
+    gap: 12px;
+  }
+  .cfg-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #0d252f;
+    border: 1px solid #2f5866;
+    color: #cfe6ee;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+  }
+  .cfg-select {
+    width: 100%;
+    min-height: 38px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: #0e181c;
+    color: #edf7fa;
+    border: 1px solid #2a3a41;
+    font-size: 14px;
+  }
+  .cfg-select:disabled { opacity: 0.5; }
   .machine {
     min-height: 510px;
     overflow-x: auto;
