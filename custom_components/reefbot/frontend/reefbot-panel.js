@@ -761,7 +761,7 @@ function renderHeader(model) {
         <ha-icon icon="mdi:menu"></ha-icon>
       </button>
       <div class="brand-mark">
-        <span></span><span></span><span></span><i></i>
+        <img class="brand-img" src="/reefbot/logo.png" alt="ReefBot" />
       </div>
       <div>
         <h1>ReefBot</h1>
@@ -1479,18 +1479,17 @@ function cfgParamDe(name) {
   const key = String(name || "").trim().toLowerCase();
   return CFG_PARAM_DE[key] || String(name || "");
 }
-function cfgKitColor(parameterName, fallbackIndex) {
-  const key = (parameterName || "").trim().toLowerCase();
-  let idx;
-  if (!key) {
-    idx = fallbackIndex;
-  } else {
-    let h = 0;
-    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) & 0x7fffffff;
-    idx = h;
-  }
+// Gap 7: Kit-Farbe SEQUENZIELL nach Index vergeben (nicht per Parameter-Hash),
+// sonst bekommen zwei Kits mit gleichem Parameter dieselbe Farbe und Hash-
+// Kollisionen färben "fast alles gleich". Max. 8 Kits (= 8 Tubes) → kollisionsfrei.
+function cfgKitColor(index) {
   const n = KIT_COLOR_PALETTE.length;
-  return KIT_COLOR_PALETTE[((idx % n) + n) % n];
+  return KIT_COLOR_PALETTE[((index % n) + n) % n];
+}
+// Erste noch nicht belegte Palettenfarbe (stabile Farbe beim Hinzufügen).
+function cfgFirstFreeKitColor(state) {
+  const used = new Set(state.kits.map((k) => k.colorHex));
+  return KIT_COLOR_PALETTE.find((c) => !used.has(c)) || cfgKitColor(state.kits.length);
 }
 
 // Rohdaten → editierbarer Konfig-Zustand { vialCount, kits, catalog }.
@@ -1568,7 +1567,7 @@ function buildTestConfig(model) {
 
   const kits = [...clusterKits, ...orphanKits]
     .sort((a, b) => (a.reagents[0] ? a.reagents[0].slot : 1e9) - (b.reagents[0] ? b.reagents[0].slot : 1e9))
-    .map((kit, i) => ({ ...kit, colorHex: cfgKitColor(kit.parameterName, i) }));
+    .map((kit, i) => ({ ...kit, colorHex: cfgKitColor(i) }));
 
   return { vialCount, kits, catalog };
 }
@@ -1611,7 +1610,7 @@ function cfgWithKitAdded(state, kit) {
     displayName: cfgCleanKitName(kit.displayName),
     parameterName: kit.parameterName || null,
     parameters: kit.parameterName ? [kit.parameterName] : [],
-    colorHex: cfgKitColor(kit.parameterName, state.kits.length),
+    colorHex: cfgFirstFreeKitColor(state),
     reagents,
   };
   return { ...state, kits: [...state.kits, newKit] };
@@ -2894,24 +2893,21 @@ const styles = `
   .brand-mark {
     width: 78px;
     height: 78px;
+    min-width: 78px;
+    aspect-ratio: 1 / 1;
+    flex: 0 0 auto;
     border-radius: 20px;
     background: #1289a6;
     position: relative;
     overflow: hidden;
     box-shadow: 0 16px 38px rgba(0, 0, 0, 0.35);
   }
-  .brand-mark span, .brand-mark i {
-    position: absolute;
-    top: 30px;
-    height: 18px;
-    border-radius: 12px;
-    background: #fff;
-    transform: rotate(-12deg);
+  .brand-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
-  .brand-mark span:nth-child(1) { left: 14px; width: 14px; }
-  .brand-mark span:nth-child(2) { left: 34px; width: 22px; }
-  .brand-mark span:nth-child(3) { left: 62px; width: 34px; }
-  .brand-mark i { right: 13px; top: 24px; width: 15px; height: 15px; border-radius: 50%; }
   h1, h2, p { margin: 0; }
   h1 { font-size: 32px; letter-spacing: 0; }
   .header p { color: #91a2a9; margin-top: 4px; }
@@ -3544,7 +3540,7 @@ const styles = `
     padding: 5px 6px 5px 8px;
   }
   .cfg-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex: 0 0 auto; }
-  .cfg-kitmeta { min-width: 0; max-width: 150px; }
+  .cfg-kitmeta { min-width: 0; max-width: 150px; min-height: 42px; }
   .cfg-kitname {
     color: #ddeaee;
     font-size: 12px;

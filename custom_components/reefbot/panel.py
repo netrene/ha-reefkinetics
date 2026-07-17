@@ -16,12 +16,15 @@ PANEL_URL = "reefbot"
 PANEL_COMPONENT_NAME = "reefbot-panel"
 PANEL_TITLE = "ReefBot"
 PANEL_ICON = "mdi:robot-industrial-outline"
-PANEL_VERSION = "0.16.3"
+PANEL_VERSION = "0.16.4"
 PANEL_FILE = "frontend/reefbot-panel.js"
 PANEL_MODULE_URL = f"/reefbot/panel-{PANEL_VERSION}.js"
+PANEL_LOGO_FILE = "icon.png"
+PANEL_LOGO_URL = "/reefbot/logo.png"
 
 PANEL_REGISTERED_VERSION = "__panel_registered_version"
 STATIC_REGISTERED = "__static_registered"
+LOGO_REGISTERED = "__logo_registered"
 
 
 async def async_setup_panel(hass: HomeAssistant) -> None:
@@ -34,6 +37,18 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
             [StaticPathConfig(PANEL_MODULE_URL, str(static_path), False)]
         )
         data[STATIC_REGISTERED] = PANEL_VERSION
+
+    # Logo unter einer stabilen URL bereitstellen (einmalig; try/except fängt
+    # ein erneutes Registrieren nach Reload ab, da statische Pfade bestehen bleiben).
+    if not data.get(LOGO_REGISTERED):
+        logo_path = Path(__file__).parent / PANEL_LOGO_FILE
+        try:
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(PANEL_LOGO_URL, str(logo_path), False)]
+            )
+        except (RuntimeError, ValueError):
+            pass
+        data[LOGO_REGISTERED] = True
 
     frontend_panels = hass.data.get("frontend_panels", {})
     if (
