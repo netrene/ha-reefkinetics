@@ -7,3 +7,10 @@ __pycache__/
 .venv/
 venv/
 
+
+# Lokale Handoff-/Arbeitsdokumente (nicht im Public-Repo)
+handoff.md
+docs/
+*-handoff*.md
+*-prompt*.md
+panel-redesign-*.md
