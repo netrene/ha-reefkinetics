@@ -3213,7 +3213,9 @@ const styles = `
   }
   .lab-frame {
     position: relative;
-    width: min(100%, 640px);
+    /* Die Karussell-Grafik hat feste Maße (rx <= 170 wie in der App) — der Rahmen
+       wird darauf zugeschnitten, sonst steht viel leerer Rand links/rechts. */
+    width: min(100%, 520px);
     height: 470px;
     margin: 0 auto;
     border-radius: 14px;
