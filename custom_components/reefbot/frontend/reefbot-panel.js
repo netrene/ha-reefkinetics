@@ -341,7 +341,7 @@ class ReefBotPanel extends HTMLElement {
     const resize = () => {
       const width = canvas.clientWidth || stage.clientWidth || 600;
       canvas.width = width * dpr;
-      canvas.height = 470 * dpr;
+      canvas.height = LAB_CANVAS_H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     resize();
@@ -402,7 +402,7 @@ class ReefBotPanel extends HTMLElement {
       }
       if (!drag) state.cur += (state.tgt - state.cur) * 0.18;
       const sel = ((Math.round(state.tgt) % count) + count) % count;
-      drawLabCarousel(ctx, canvas.width / dpr, 470, tubes, state.cur, sel, time, active);
+      drawLabCarousel(ctx, canvas.width / dpr, LAB_CANVAS_H, tubes, state.cur, sel, time, active);
       labelsEl.innerHTML = labNeighborLabels(tubes, sel);
       this._lab.raf = window.requestAnimationFrame(frame);
     };
@@ -1114,6 +1114,11 @@ function labSyringe(ctx, cx, top, s, plunger) {
   ctx.beginPath(); ctx.moveTo(cx, bt + barH); ctx.lineTo(cx, bt + barH + 26 * s); ctx.stroke();
 }
 
+// Sichtbare Canvas-Hoehe der Lab-Grafik. Muss zur .lab-frame/.lab-machine-CSS
+// passen. Zusammen mit LAB_TOP_TRIM (im Draw) wird die leere Flaeche oben
+// gekappt; unten bleibt Platz fuer die Nachbar-Labels-Zeile.
+const LAB_CANVAS_H = 445;
+
 function drawLabCarousel(ctx, W, H, tubes, rotation, selectedIndex, now, active) {
   const count = tubes.length;
   const cx = W / 2, ringCy = 262;
@@ -1122,7 +1127,14 @@ function drawLabCarousel(ctx, W, H, tubes, rotation, selectedIndex, now, active)
   // rx so klein werden, dass Rahmen UND Seiten-Vials komplett hineinpassen.
   const rx = Math.max(60, Math.min(170, W * 0.42, W / 2 - 24));
   const ry = 74, sMin = 0.42, sMax = 1, step = 2 * Math.PI / count;
-  ctx.clearRect(0, 0, W, H);
+  // Die Komposition ist in einem ~470px-Koordinatensystem verankert (feste
+  // Konstanten ringCy/railY/chTop). Statt alle zu verschieben, wird das ganze
+  // Bild um LAB_TOP_TRIM nach oben gezogen — kappt die leere Flaeche ueber der
+  // oberen Oktagon-Kappe, ohne die interne Geometrie anzufassen.
+  const LAB_TOP_TRIM = 40;
+  ctx.clearRect(0, 0, W, H + LAB_TOP_TRIM);
+  ctx.save();
+  ctx.translate(0, -LAB_TOP_TRIM);
 
   const octR = rx + 18, octRyTop = 30, octRyBot = 34, capCy = 100;
   const baseCy = ringCy + ry + 18, edgeX = octR * Math.cos(Math.PI / 8);
@@ -1214,6 +1226,7 @@ function drawLabCarousel(ctx, W, H, tubes, rotation, selectedIndex, now, active)
       ctx.globalAlpha = 1;
     }
   }
+  ctx.restore();
 }
 
 function labNeighborChip(tube, big) {
@@ -1241,7 +1254,7 @@ function labNeighborLabels(tubes, selectedIndex) {
 
 function renderMachineLab(model) {
   return `
-    <section class="machine lab-machine">
+    <section class="lab-machine">
       <div class="lab-frame">
         <span class="lab-badge">REEFBOT LAB · ${model.tubes.length} VIALS</span>
         <div class="lab-stage">
@@ -3190,9 +3203,9 @@ const styles = `
 
   .lab-machine {
     /* feste Reserve + kein Schrumpfen: sonst kollabiert die Sektion in einem
-       hoehenbegrenzten Flex-Kontext (Companion-App) und der Rahmen ueberlappt
+       hoehenbegrenzten Flex-Kontext (Companion-App) und die Grafik ueberlappt
        die darunterliegenden Buttons. */
-    min-height: 490px;
+    min-height: 445px;
     flex-shrink: 0;
     overflow: visible;
   }
@@ -3223,16 +3236,13 @@ const styles = `
   }
   .lab-frame {
     position: relative;
-    /* Rahmen eng an der Grafik; Pfeile sitzen in eigenen Flex-Spalten neben dem
-       Canvas (nicht darueber), daher kein leerer Rand und keine Überlappung. */
-    width: min(100%, 480px);
-    height: 470px;
+    /* Kein dekorativer Rahmen mehr (wie in der App): die Grafik steht direkt
+       auf dem Panel-Hintergrund. Pfeile sitzen in eigenen Flex-Spalten neben
+       dem Canvas. Hoehe = LAB_CANVAS_H. */
+    width: min(100%, 460px);
+    height: 445px;
     margin: 0 auto;
-    border-radius: 14px;
-    background: #0c1113;
-    border: 10px solid #30383d;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 54px rgba(0, 0, 0, 0.35);
-    overflow: hidden;
+    overflow: visible;
   }
   .lab-stage {
     position: absolute;
