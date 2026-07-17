@@ -1652,7 +1652,7 @@ function renderConfigOverlay(model, open, state) {
         const vials = k.reagents.map((r) => `
           <div class="cfg-vialcol" title="Tube ${escapeHtml(r.slot)} · ${escapeHtml(r.chemicalName)}">
             <div class="cfg-vial"><span class="cfg-vial-fill" style="background:${k.colorHex};"></span><span class="cfg-vial-label">${escapeHtml(r.shortLabel || r.slot)}</span></div>
-            <span class="cfg-vial-num">${escapeHtml(r.slot)}</span>
+            <span class="cfg-vial-num" style="border-color:${k.colorHex}; color:${k.colorHex};">${escapeHtml(r.slot)}</span>
           </div>`).join("");
         return `
           <div class="cfg-kitgroup">
@@ -1670,7 +1670,7 @@ function renderConfigOverlay(model, open, state) {
       }).join("")
     : `<p class="cfg-empty">Noch keine Tests konfiguriert.</p>`;
   const freeRow = free.length
-    ? `<div class="cfg-freerow">${free.map((s) => `<div class="cfg-vialcol"><div class="cfg-vial empty"></div><span class="cfg-vial-num">${s}</span></div>`).join("")}</div>`
+    ? `<div class="cfg-freerow">${free.map((s) => `<div class="cfg-vialcol"><div class="cfg-vial empty"></div><span class="cfg-vial-num free">${s}</span></div>`).join("")}</div>`
     : "";
   const addList = addable.length
     ? addable.map((kit) => `
@@ -3593,7 +3593,22 @@ const styles = `
     font-weight: 700;
     color: #08111a;
   }
-  .cfg-vial-num { color: #9fb0b8; font-size: 10px; line-height: 1; }
+  .cfg-vial-num {
+    min-width: 21px;
+    height: 21px;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1.5px solid #2f5866;
+    background: rgba(11, 20, 24, 0.65);
+    color: #cfe6ee;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .cfg-vial-num.free { border-color: #33424a; color: #7f9299; }
   .cfg-addlist { display: flex; flex-direction: column; gap: 6px; }
   .cfg-add-kit {
     display: flex;
