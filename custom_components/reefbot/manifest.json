@@ -9,5 +9,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/netrene/ha-reefkinetics/issues",
   "requirements": [],
-  "version": "0.16.5"
+  "version": "0.16.6"
 }

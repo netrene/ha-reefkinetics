@@ -370,21 +370,22 @@ class ReefBotPanel extends HTMLElement {
       if (lockFront != null) return;
       drag = true;
       lastX = event.clientX;
-      stage.style.cursor = "grabbing";
+      canvas.style.cursor = "grabbing";
     };
     const onMove = (event) => {
       if (!drag) return;
-      const rx = Math.min(170, Math.max(140, (canvas.clientWidth || 600) * 0.37));
+      const w = canvas.clientWidth || 600;
+      const rx = Math.max(60, Math.min(170, w * 0.42, w / 2 - 24));
       state.cur -= (event.clientX - lastX) / (rx * 0.9);
       lastX = event.clientX;
     };
     const onUp = () => {
       if (!drag) return;
       drag = false;
-      stage.style.cursor = "grab";
+      canvas.style.cursor = "grab";
       state.tgt = Math.round(state.cur);
     };
-    stage.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointerdown", onDown);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("resize", resize);
@@ -1116,7 +1117,10 @@ function labSyringe(ctx, cx, top, s, plunger) {
 function drawLabCarousel(ctx, W, H, tubes, rotation, selectedIndex, now, active) {
   const count = tubes.length;
   const cx = W / 2, ringCy = 262;
-  const rx = Math.min(170, Math.max(140, W * 0.37));
+  // rx an die tatsaechliche Canvas-Breite koppeln: der Oktagon-Rahmen ist rx+18
+  // breit — bei schmalem Canvas (Companion-App, Pfeile in eigenen Spalten) muss
+  // rx so klein werden, dass Rahmen UND Seiten-Vials komplett hineinpassen.
+  const rx = Math.max(60, Math.min(170, W * 0.42, W / 2 - 24));
   const ry = 74, sMin = 0.42, sMax = 1, step = 2 * Math.PI / count;
   ctx.clearRect(0, 0, W, H);
 
@@ -1239,13 +1243,15 @@ function renderMachineLab(model) {
   return `
     <section class="machine lab-machine">
       <div class="lab-frame">
+        <span class="lab-badge">REEFBOT LAB · ${model.tubes.length} VIALS</span>
         <div class="lab-stage">
-          <span class="lab-badge">REEFBOT LAB · ${model.tubes.length} VIALS</span>
-          <canvas class="lab-canvas"></canvas>
-          <button class="lab-arrow left" data-lab-rotate="-1" aria-label="Vorheriges Vial">&lsaquo;</button>
-          <button class="lab-arrow right" data-lab-rotate="1" aria-label="Nächstes Vial">&rsaquo;</button>
-          <div class="lab-tap" data-lab-tap title="Röhrchen öffnen"></div>
-          <div class="lab-labels"></div>
+          <button class="lab-arrow" data-lab-rotate="-1" aria-label="Vorheriges Vial">&lsaquo;</button>
+          <div class="lab-canvas-wrap">
+            <canvas class="lab-canvas"></canvas>
+            <div class="lab-tap" data-lab-tap title="Röhrchen öffnen"></div>
+            <div class="lab-labels"></div>
+          </div>
+          <button class="lab-arrow" data-lab-rotate="1" aria-label="Nächstes Vial">&rsaquo;</button>
         </div>
       </div>
     </section>
@@ -3183,7 +3189,11 @@ const styles = `
   }
 
   .lab-machine {
-    min-height: 0;
+    /* feste Reserve + kein Schrumpfen: sonst kollabiert die Sektion in einem
+       hoehenbegrenzten Flex-Kontext (Companion-App) und der Rahmen ueberlappt
+       die darunterliegenden Buttons. */
+    min-height: 490px;
+    flex-shrink: 0;
     overflow: visible;
   }
   .lab-demo-toggle {
@@ -3213,9 +3223,9 @@ const styles = `
   }
   .lab-frame {
     position: relative;
-    /* Die Karussell-Grafik hat feste Maße (rx <= 170 wie in der App) — der Rahmen
-       wird darauf zugeschnitten, sonst steht viel leerer Rand links/rechts. */
-    width: min(100%, 520px);
+    /* Rahmen eng an der Grafik; Pfeile sitzen in eigenen Flex-Spalten neben dem
+       Canvas (nicht darueber), daher kein leerer Rand und keine Überlappung. */
+    width: min(100%, 480px);
     height: 470px;
     margin: 0 auto;
     border-radius: 14px;
@@ -3227,6 +3237,16 @@ const styles = `
   .lab-stage {
     position: absolute;
     inset: 0;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 6px;
+  }
+  .lab-canvas-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
   }
   .lab-badge {
     position: absolute;
@@ -3247,10 +3267,10 @@ const styles = `
     cursor: grab;
   }
   .lab-arrow {
-    position: absolute;
-    top: 176px;
-    width: 46px;
-    height: 46px;
+    position: static;
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
     background: #0c1c22;
     border: 1.5px solid #3a5560;
@@ -3260,8 +3280,6 @@ const styles = `
     cursor: pointer;
     z-index: 4;
   }
-  .lab-arrow.left { left: 8px; }
-  .lab-arrow.right { right: 8px; }
   .lab-tap {
     position: absolute;
     left: 50%;
