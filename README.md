@@ -3,7 +3,7 @@
 Bring your **Reef Kinetics ReefBot** automatic aquarium tester into Home Assistant — with live test results, tube and maintenance status, one-tap test starts, and a dedicated ReefBot-styled control panel in the sidebar.
 
 <p align="center">
-  <img src="images/reefbot-lab-panel.png" alt="ReefBot sidebar panel – carousel view of all vials" width="480">
+  <img src="images/panel-lab.png" alt="ReefBot sidebar panel – full view with tests, vial carousel, and maintenance levels" width="820">
 </p>
 
 > The panel does not talk to the Reef Kinetics cloud directly. It only reads the Home Assistant entities this integration creates and presses the existing Home Assistant button entities — so everything you see and do stays inside Home Assistant's permission model.
@@ -53,11 +53,32 @@ Detection is automatic from the device's reported vial count.
 
 ## Screenshots
 
+All screenshots use the panel's built‑in demo mode (no real device data).
+
+**Full panel — ReefBot Lab (12 vials)**
+
 <p align="center">
-  <img src="images/reefbot-lab-panel.png" alt="ReefBot Lab 12-vial carousel" width="440">
+  <img src="images/panel-lab.png" alt="Full ReefBot panel in Lab mode: header status, tests row, last operation, 12-vial carousel, and RODI/Waste/Syringe footer" width="820">
 </p>
 
-*ReefBot Lab (12 vials) carousel as rendered by the sidebar panel. More views (V2 machine, tests, RODI/Waste, configuration editor) coming soon.*
+**Full panel — ReefBot V2 (8 vials)**
+
+<p align="center">
+  <img src="images/panel-v2.png" alt="Full ReefBot panel in V2 mode: 8-vial machine with animated syringe gantry and test chamber" width="820">
+</p>
+
+**Test‑configuration editor** — reagents that belong to the same kit are grouped automatically; the full tube assignment is written back to the device on save.
+
+<p align="center">
+  <img src="images/test-config.png" alt="Test-configuration editor showing kit clustering with tube numbers and short labels" width="560">
+</p>
+
+**Reagent maintenance** — carousel and list views with per‑tube refill actions.
+
+<p align="center">
+  <img src="images/maintenance-carousel.png" alt="Reagent maintenance carousel view" width="410">
+  <img src="images/maintenance-list.png" alt="Reagent maintenance list view" width="410">
+</p>
 
 ## Installation with HACS
 
